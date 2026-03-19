@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fail2Ban SOC Dashboard</title>
+    
+    <!-- TailwindCSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React 18 -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'soc-dark': '#0a0e17',
+                        'soc-panel': '#111827',
+                        'soc-card': '#1a2234',
+                        'soc-border': '#2d3748',
+                        'soc-cyan': '#06b6d4',
+                        'soc-cyan-dark': '#0891b2',
+                        'soc-red': '#ef4444',
+                        'soc-red-dark': '#dc2626',
+                        'soc-green': '#10b981',
+                        'soc-yellow': '#f59e0b',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #0a0e17 0%, #1a1a2e 100%);
+            min-height: 100vh;
+        }
+        
+        .glow-cyan {
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+        }
+        
+        .glow-red {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+        }
+        
+        .stat-card {
+            background: linear-gradient(145deg, #1a2234 0%, #111827 100%);
+            border: 1px solid #2d3748;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: #06b6d4;
+            box-shadow: 0 0 30px rgba(6, 182, 212, 0.2);
+        }
+        
+        .panel {
+            background: linear-gradient(145deg, #1a2234 0%, #111827 100%);
+            border: 1px solid #2d3748;
+        }
+        
+        .leaflet-container {
+            background: #111827;
+            border-radius: 8px;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a2234;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #2d3748;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #06b6d4;
+        }
+        
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        @keyframes scan {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        
+        .scan-line {
+            animation: scan 3s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // Country coordinates mapping
+        const country_coordinates = {
+            'CN': [35.8617, 104.1954],
+            'US': [37.0902, -95.7129],
+            'RU': [61.5240, 105.3188],
+            'BR': [-14.2350, -51.9253],
+            'IN': [20.5937, 78.9629],
+            'DE': [51.1657, 10.4515],
+            'FR': [46.2276, 2.2137],
+            'NL': [52.1326, 5.2913],
+            'UA': [48.3794, 31.1656],
+            'VN': [14.0583, 108.2772],
+            'RO': [45.9432, 24.9668],
+            'PL': [51.9194, 19.1451],
+            'KR': [35.9078, 127.7669],
+            'JP': [36.2048, 138.2529],
+            'GB': [55.3781, -3.4360],
+            'ID': [-0.7893, 113.9213],
+            'TR': [38.9637, 35.2433],
+            'IT': [41.8719, 12.5674],
+            'ES': [40.4637, -3.7492],
+            'AR': [-38.4161, -63.6167],
+            'CO': [4.5709, -74.2973],
+            'CL': [-35.6751, -71.5430],
+            'MX': [23.6345, -102.5528],
+            'CA': [56.1304, -106.3468],
+            'AU': [-25.2744, 133.7751],
+            'TH': [15.8700, 100.9925],
+            'NG': [9.0820, 8.6753],
+            'ZA': [-30.5595, 22.9375],
+            'EG': [26.8206, 30.8025],
+            'PK': [30.3753, 69.3451],
+            'IR': [32.4279, 53.6880],
+            'HK': [22.3193, 114.1694],
+            'TW': [23.6978, 120.9605],
+            'SG': [1.3521, 103.8198],
+            'AE': [23.4241, 53.8478],
+            'SA': [23.8859, 45.0792],
+        };
+        
+        // Demo data fallback
+        const demo_data = {
+            overview: {
+                total_bans: 15420,
+                today_bans: 234,
+                week_bans: 1823,
+                active_bans: 892,
+                top_countries: [
+                    { country: 'CN', country_name: 'China', total_attacks: 4823, unique_ips: 1234 },
+                    { country: 'US', country_name: 'United States', total_attacks: 2156, unique_ips: 567 },
+                    { country: 'RU', country_name: 'Russia', total_attacks: 1892, unique_ips: 445 },
+                    { country: 'BR', country_name: 'Brazil', total_attacks: 1245, unique_ips: 312 },
+                    { country: 'VN', country_name: 'Vietnam', total_attacks: 987, unique_ips: 234 },
+                    { country: 'IN', country_name: 'India', total_attacks: 876, unique_ips: 198 },
+                    { country: 'UA', country_name: 'Ukraine', total_attacks: 765, unique_ips: 176 },
+                    { country: 'NL', country_name: 'Netherlands', total_attacks: 654, unique_ips: 143 },
+                    { country: 'DE', country_name: 'Germany', total_attacks: 543, unique_ips: 121 },
+                    { country: 'RO', country_name: 'Romania', total_attacks: 432, unique_ips: 98 },
+                ],
+                jails: [
+                    { jail: 'sshd', total_bans: 8234, active_bans: 456 },
+                    { jail: 'nginx-http-auth', total_bans: 3421, active_bans: 234 },
+                    { jail: 'nginx-noscript', total_bans: 2156, active_bans: 123 },
+                    { jail: 'recidive', total_bans: 876, active_bans: 45 },
+                    { jail: 'apache-badbots', total_bans: 543, active_bans: 23 },
+                    { jail: 'vsftpd', total_bans: 190, active_bans: 11 },
+                ]
+            },
+            attacks_over_time: {
+                data: [
+                    { period: '2026-03-13', count: 156 },
+                    { period: '2026-03-14', count: 189 },
+                    { period: '2026-03-15', count: 234 },
+                    { period: '2026-03-16', count: 198 },
+                    { period: '2026-03-17', count: 276 },
+                    { period: '2026-03-18', count: 312 },
+                    { period: '2026-03-19', count: 234 },
+                ]
+            },
+            top_countries: [
+                { country: 'CN', country_name: 'China', total_attacks: 4823, unique_ips: 1234 },
+                { country: 'US', country_name: 'United States', total_attacks: 2156, unique_ips: 567 },
+                { country: 'RU', country_name: 'Russia', total_attacks: 1892, unique_ips: 445 },
+                { country: 'BR', country_name: 'Brazil', total_attacks: 1245, unique_ips: 312 },
+                { country: 'VN', country_name: 'Vietnam', total_attacks: 987, unique_ips: 234 },
+                { country: 'IN', country_name: 'India', total_attacks: 876, unique_ips: 198 },
+                { country: 'UA', country_name: 'Ukraine', total_attacks: 765, unique_ips: 176 },
+                { country: 'NL', country_name: 'Netherlands', total_attacks: 654, unique_ips: 143 },
+                { country: 'DE', country_name: 'Germany', total_attacks: 543, unique_ips: 121 },
+                { country: 'RO', country_name: 'Romania', total_attacks: 432, unique_ips: 98 },
+            ],
+            heatmap_data: {
+                heatmap: [
+                    { country: 'CN', country_name: 'China', total_attacks: 4823, intensity: 100 },
+                    { country: 'US', country_name: 'United States', total_attacks: 2156, intensity: 45 },
+                    { country: 'RU', country_name: 'Russia', total_attacks: 1892, intensity: 39 },
+                    { country: 'BR', country_name: 'Brazil', total_attacks: 1245, intensity: 26 },
+                    { country: 'VN', country_name: 'Vietnam', total_attacks: 987, intensity: 20 },
+                    { country: 'IN', country_name: 'India', total_attacks: 876, intensity: 18 },
+                    { country: 'UA', country_name: 'Ukraine', total_attacks: 765, intensity: 16 },
+                    { country: 'NL', country_name: 'Netherlands', total_attacks: 654, intensity: 14 },
+                    { country: 'DE', country_name: 'Germany', total_attacks: 543, intensity: 11 },
+                    { country: 'RO', country_name: 'Romania', total_attacks: 432, intensity: 9 },
+                ]
+            },
+            banned_ips: {
+                total: 892,
+                ips: [
+                    { ip: '185.220.101.45', country: 'DE', country_name: 'Germany', jail: 'sshd', ban_timestamp: '2026-03-19T18:45:23', ban_count: 3 },
+                    { ip: '45.33.32.156', country: 'US', country_name: 'United States', jail: 'nginx-http-auth', ban_timestamp: '2026-03-19T18:32:11', ban_count: 1 },
+                    { ip: '91.121.87.10', country: 'FR', country_name: 'France', jail: 'sshd', ban_timestamp: '2026-03-19T18:28:45', ban_count: 7 },
+                    { ip: '123.45.67.89', country: 'CN', country_name: 'China', jail: 'nginx-noscript', ban_timestamp: '2026-03-19T18:15:33', ban_count: 2 },
+                    { ip: '89.248.167.131', country: 'NL', country_name: 'Netherlands', jail: 'recidive', ban_timestamp: '2026-03-19T18:02:19', ban_count: 12 },
+                    { ip: '194.26.29.102', country: 'RU', country_name: 'Russia', jail: 'sshd', ban_timestamp: '2026-03-19T17:55:44', ban_count: 5 },
+                    { ip: '51.68.11.215', country: 'PL', country_name: 'Poland', jail: 'apache-badbots', ban_timestamp: '2026-03-19T17:42:28', ban_count: 1 },
+                    { ip: '45.155.205.233', country: 'CN', country_name: 'China', jail: 'nginx-http-auth', ban_timestamp: '2026-03-19T17:38:12', ban_count: 4 },
+                    { ip: '185.220.101.78', country: 'DE', country_name: 'Germany', jail: 'sshd', ban_timestamp: '2026-03-19T17:25:56', ban_count: 2 },
+                    { ip: '23.129.64.130', country: 'US', country_name: 'United States', jail: 'recidive', ban_timestamp: '2026-03-19T17:12:33', ban_count: 8 },
+                    { ip: '162.247.74.27', country: 'US', country_name: 'United States', jail: 'sshd', ban_timestamp: '2026-03-19T17:05:18', ban_count: 6 },
+                    { ip: '91.92.109.43', country: 'RO', country_name: 'Romania', jail: 'nginx-noscript', ban_timestamp: '2026-03-19T16:58:42', ban_count: 3 },
+                ]
+            }
+        };
+        
+        // API functions
+        async function fetch_api(endpoint, fallback_data) {
+            try {
+                const response = await fetch(`http://localhost:8000${endpoint}`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) throw new Error('API error');
+                return await response.json();
+            } catch (error) {
+                console.log(`Using demo data for ${endpoint}`);
+                return fallback_data;
+            }
+        }
+        
+        // Header Component
+        function Header({ lastUpdate, status }) {
+            return (
+                <header className="bg-soc-panel border-b border-soc-border px-6 py-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-gradient-to-br from-soc-cyan to-blue-600 rounded-lg flex items-center justify-center glow-cyan">
+                                <i className="fas fa-shield-halved text-2xl text-white"></i>
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold text-white tracking-wide">
+                                    <span className="text-soc-cyan">Fail2Ban</span> SOC Dashboard
+                                </h1>
+                                <p className="text-gray-400 text-sm">Security Operations Center - Real-time Monitoring</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <div className="text-right">
+                                <div className="flex items-center gap-2 justify-end">
+                                    <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-soc-green pulse-dot' : 'bg-soc-red'}`}></span>
+                                    <span className="text-sm text-gray-300">{status === 'connected' ? 'API Online' : 'Demo Mode'}</span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">Last update: {lastUpdate}</p>
+                            </div>
+                            <button className="bg-soc-cyan hover:bg-soc-cyan-dark text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+                                <i className="fas fa-sync-alt"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                </header>
+            );
+        }
+        
+        // Stat Card Component
+        function StatCard({ title, value, icon, color, subtext }) {
+            return (
+                <div className="stat-card rounded-xl p-5">
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <p className="text-gray-400 text-sm mb-1">{title}</p>
+                            <p className="text-3xl font-bold text-white">{value.toLocaleString()}</p>
+                            {subtext && <p className="text-xs text-gray-500 mt-1">{subtext}</p>}
+                        </div>
+                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${color}`}>
+                            <i className={`${icon} text-xl text-white`}></i>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        // World Map Component
+        function WorldMap({ data }) {
+            const mapRef = useRef(null);
+            const mapInstanceRef = useRef(null);
+            
+            useEffect(() => {
+                if (!mapRef.current || mapInstanceRef.current) return;
+                
+                mapInstanceRef.current = L.map(mapRef.current, {
+                    center: [20, 0],
+                    zoom: 2,
+                    zoomControl: true,
+                    attributionControl: false
+                });
+                
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    maxZoom: 19
+                }).addTo(mapInstanceRef.current);
+                
+                return () => {
+                    if (mapInstanceRef.current) {
+                        mapInstanceRef.current.remove();
+                        mapInstanceRef.current = null;
+                    }
+                };
+            }, []);
+            
+            useEffect(() => {
+                if (!mapInstanceRef.current || !data) return;
+                
+                // Clear existing markers
+                mapInstanceRef.current.eachLayer((layer) => {
+                    if (layer instanceof L.CircleMarker) {
+                        mapInstanceRef.current.removeLayer(layer);
+                    }
+                });
+                
+                // Add markers
+                data.forEach((country, index) => {
+                    const coords = country_coordinates[country.country];
+                    if (!coords) return;
+                    
+                    const maxAttacks = Math.max(...data.map(d => d.total_attacks));
+                    const intensity = country.total_attacks / maxAttacks;
+                    const radius = 8 + (intensity * 25);
+                    
+                    // Color gradient from green to red
+                    const r = Math.round(255 * intensity);
+                    const g = Math.round(255 * (1 - intensity));
+                    const color = `rgb(${r}, ${g}, 0)`;
+                    
+                    const marker = L.circleMarker(coords, {
+                        radius: radius,
+                        fillColor: color,
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 0.8,
+                        fillOpacity: 0.7
+                    });
+                    
+                    marker.bindTooltip(`
+                        <div class="text-center">
+                            <strong class="text-white">${country.country_name}</strong><br/>
+                            <span class="text-cyan-400">${country.total_attacks.toLocaleString()} attacks</span><br/>
+                            <span class="text-gray-400">${country.unique_ips} unique IPs</span>
+                        </div>
+                    `, {
+                        className: 'bg-soc-card border border-soc-border rounded-lg p-2',
+                        direction: 'top'
+                    });
+                    
+                    marker.addTo(mapInstanceRef.current);
+                });
+            }, [data]);
+            
+            return (
+                <div className="panel rounded-xl p-4 h-full">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <i className="fas fa-globe text-soc-cyan"></i>
+                            Attack Origins Map
+                        </h3>
+                        <div className="flex items-center gap-2 text-xs">
+                            <span className="text-gray-400">Intensity:</span>
+                            <div className="flex items-center gap-1">
+                                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                <span className="text-gray-400">Low</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                <span className="text-gray-400">Med</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                <span className="text-gray-400">High</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div ref={mapRef} className="h-[300px] rounded-lg overflow-hidden"></div>
+                </div>
+            );
+        }
+        
+        // Heatmap Panel Component
+        function HeatmapPanel({ data }) {
+            if (!data || data.length === 0) {
+                return (
+                    <div className="panel rounded-xl p-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                            <i className="fas fa-fire text-soc-red"></i>
+                            Attack Intensity Heatmap
+                        </h3>
+                        <div className="h-[300px] flex items-center justify-center text-gray-500">
+                            Sem dados
+                        </div>
+                    </div>
+                );
+            }
+            
+            const maxAttacks = Math.max(...data.map(d => d.total_attacks));
+            
+            return (
+                <div className="panel rounded-xl p-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                        <i className="fas fa-fire text-soc-red"></i>
+                        Attack Intensity Heatmap
+                    </h3>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                        {data.slice(0, 15).map((country, index) => {
+                            const percentage = (country.total_attacks / maxAttacks) * 100;
+                            const color = `rgb(${Math.round(239 * (percentage / 100))}, ${Math.round(68 * (1 - percentage / 100))}, ${Math.round(68 * (1 - percentage / 100))})`;
+                            
+                            return (
+                                <div key={country.country} className="flex items-center gap-3">
+                                    <span className="text-gray-400 text-sm w-6">{index + 1}</span>
+                                    <span className="text-white text-sm w-24 truncate">{country.country_name}</span>
+                                    <div className="flex-1 h-6 bg-soc-dark rounded overflow-hidden relative">
+                                        <div 
+                                            className="h-full rounded transition-all duration-500"
+                                            style={{ 
+                                                width: `${percentage}%`,
+                                                background: `linear-gradient(90deg, #064e3b 0%, ${color} 100%)`
+                                            }}
+                                        ></div>
+                                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white font-mono">
+                                            {country.total_attacks.toLocaleString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        }
+        
+        // Line Chart Component
+        function AttacksLineChart({ data }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+            
+            useEffect(() => {
+                if (!canvasRef.current || !data) return;
+                
+                if (chartRef.current) {
+                    chartRef.current.destroy();
+                }
+                
+                const ctx = canvasRef.current.getContext('2d');
+                chartRef.current = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.map(d => d.period),
+                        datasets: [{
+                            label: 'Attacks',
+                            data: data.map(d => d.count),
+                            borderColor: '#06b6d4',
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointBackgroundColor: '#06b6d4',
+                            pointBorderColor: '#fff',
+                            pointRadius: 4,
+                            pointHoverRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: '#2d3748' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            y: {
+                                grid: { color: '#2d3748' },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+                
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                    }
+                };
+            }, [data]);
+            
+            return (
+                <div className="panel rounded-xl p-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                        <i className="fas fa-chart-line text-soc-cyan"></i>
+                        Attacks Over Time (7 Days)
+                    </h3>
+                    <div className="h-[250px]">
+                        <canvas ref={canvasRef}></canvas>
+                    </div>
+                </div>
+            );
+        }
+        
+        // Bar Chart Component
+        function TopCountriesBarChart({ data }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+            
+            useEffect(() => {
+                if (!canvasRef.current || !data) return;
+                
+                if (chartRef.current) {
+                    chartRef.current.destroy();
+                }
+                
+                const ctx = canvasRef.current.getContext('2d');
+                chartRef.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.slice(0, 10).map(d => d.country_name.substring(0, 10)),
+                        datasets: [{
+                            label: 'Attacks',
+                            data: data.slice(0, 10).map(d => d.total_attacks),
+                            backgroundColor: [
+                                '#ef4444',
+                                '#f97316',
+                                '#f59e0b',
+                                '#eab308',
+                                '#84cc16',
+                                '#22c55e',
+                                '#14b8a6',
+                                '#06b6d4',
+                                '#0ea5e9',
+                                '#3b82f6'
+                            ],
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: '#2d3748' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            y: {
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+                
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                    }
+                };
+            }, [data]);
+            
+            return (
+                <div className="panel rounded-xl p-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                        <i className="fas fa-chart-bar text-soc-cyan"></i>
+                        Top 10 Attacking Countries
+                    </h3>
+                    <div className="h-[250px]">
+                        <canvas ref={canvasRef}></canvas>
+                    </div>
+                </div>
+            );
+        }
+        
+        // Pie Chart Component
+        function JailsPieChart({ data }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+            
+            useEffect(() => {
+                if (!canvasRef.current || !data) return;
+                
+                if (chartRef.current) {
+                    chartRef.current.destroy();
+                }
+                
+                const ctx = canvasRef.current.getContext('2d');
+                chartRef.current = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: data.slice(0, 5).map(d => d.jail),
+                        datasets: [{
+                            data: data.slice(0, 5).map(d => d.total_bans),
+                            backgroundColor: [
+                                '#ef4444',
+                                '#f97316',
+                                '#f59e0b',
+                                '#06b6d4',
+                                '#8b5cf6'
+                            ],
+                            borderColor: '#1a2234',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: { color: '#9ca3af', padding: 15 }
+                            }
+                        },
+                        cutout: '60%'
+                    }
+                });
+                
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                    }
+                };
+            }, [data]);
+            
+            return (
+                <div className="panel rounded-xl p-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                        <i className="fas fa-chart-pie text-soc-cyan"></i>
+                        Top 5 Targeted Services (Jails)
+                    </h3>
+                    <div className="h-[250px]">
+                        <canvas ref={canvasRef}></canvas>
+                    </div>
+                </div>
+            );
+        }
+        
+        // Recent Bans Table Component
+        function RecentBansTable({ data, loading }) {
+            if (loading) {
+                return (
+                    <div className="panel rounded-xl p-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                            <i className="fas fa-list text-soc-cyan"></i>
+                            Recent Bans
+                        </h3>
+                        <div className="flex items-center justify-center h-[300px]">
+                            <div className="text-soc-cyan">
+                                <i className="fas fa-spinner fa-spin text-2xl"></i>
+                                <p className="mt-2">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+            
+            return (
+                <div className="panel rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <i className="fas fa-list text-soc-cyan"></i>
+                            Recent Bans
+                        </h3>
+                        <span className="text-xs text-gray-400">{data?.ips?.length || 0} entries</span>
+                    </div>
+                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto pr-2">
+                        <table className="w-full">
+                            <thead className="sticky top-0 bg-soc-card">
+                                <tr className="text-left text-xs text-gray-400 border-b border-soc-border">
+                                    <th className="pb-2 font-medium">IP Address</th>
+                                    <th className="pb-2 font-medium">Country</th>
+                                    <th className="pb-2 font-medium">Jail</th>
+                                    <th className="pb-2 font-medium">Time</th>
+                                    <th className="pb-2 font-medium text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="text-sm">
+                                {data?.ips?.map((entry, index) => (
+                                    <tr key={index} className="border-b border-soc-border/50 hover:bg-soc-dark/50 transition-colors">
+                                        <td className="py-3 text-white font-mono">{entry.ip}</td>
+                                        <td className="py-3">
+                                            <span className="flex items-center gap-2">
+                                                <span className="text-lg">{get_country_flag(entry.country)}</span>
+                                                <span className="text-gray-300">{entry.country_name}</span>
+                                            </span>
+                                        </td>
+                                        <td className="py-3">
+                                            <span className="px-2 py-1 bg-soc-red/20 text-soc-red rounded text-xs">
+                                                {entry.jail}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 text-gray-400 text-xs">
+                                            {format_time(entry.ban_timestamp)}
+                                        </td>
+                                        <td className="py-3 text-right">
+                                            <button className="text-soc-cyan hover:text-white transition-colors p-1" title="View Details">
+                                                <i className="fas fa-eye"></i>
+                                            </button>
+                                            <button className="text-soc-red hover:text-white transition-colors p-1 ml-2" title="Unban">
+                                                <i className="fas fa-ban"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+        
+        // Helper functions
+        function get_country_flag(countryCode) {
+            if (!countryCode) return '🌍';
+            const codePoints = countryCode
+                .toUpperCase()
+                .split('')
+                .map(char => 127397 + char.charCodeAt(0));
+            return String.fromCodePoint(...codePoints);
+        }
+        
+        function format_time(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return 'Just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+            
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+        
+        function format_current_time() {
+            return new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+        }
+        
+        // Main App Component
+        function App() {
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [lastUpdate, setLastUpdate] = useState(format_current_time());
+            const [status, setStatus] = useState('demo');
+            const [data, setData] = useState({
+                overview: null,
+                attacks_over_time: null,
+                top_countries: null,
+                heatmap_data: null,
+                banned_ips: null
+            });
+            
+            const fetch_all_data = async () => {
+                try {
+                    setLoading(true);
+                    
+                    // Try to fetch from API
+                    const [overview, attacksOverTime, topCountries, heatmapData, bannedIps] = await Promise.all([
+                        fetch_api('/api/stats/overview', demo_data.overview),
+                        fetch_api('/api/stats/attacks-over-time?days=7&interval=day', demo_data.attacks_over_time),
+                        fetch_api('/api/stats/top-countries?limit=10', demo_data.top_countries),
+                        fetch_api('/api/stats/heatmap-data', demo_data.heatmap_data),
+                        fetch_api('/api/banned-ips?limit=20', demo_data.banned_ips)
+                    ]);
+                    
+                    setData({
+                        overview,
+                        attacks_over_time: attacksOverTime,
+                        top_countries: topCountries,
+                        heatmap_data: heatmapData,
+                        banned_ips: bannedIps
+                    });
+                    
+                    setStatus('connected');
+                    setLastUpdate(format_current_time());
+                    setError(null);
+                } catch (err) {
+                    console.error('Error fetching data:', err);
+                    setError(err.message);
+                    // Use demo data on error
+                    setData({
+                        overview: demo_data.overview,
+                        attacks_over_time: demo_data.attacks_over_time,
+                        top_countries: demo_data.top_countries,
+                        heatmap_data: demo_data.heatmap_data,
+                        banned_ips: demo_data.banned_ips
+                    });
+                    setStatus('demo');
+                } finally {
+                    setLoading(false);
+                }
+            };
+            
+            useEffect(() => {
+                fetch_all_data();
+                
+                // Auto-refresh every 30 seconds
+                const interval = setInterval(fetch_all_data, 30000);
+                
+                return () => clearInterval(interval);
+            }, []);
+            
+            return (
+                <div className="min-h-screen">
+                    <Header lastUpdate={lastUpdate} status={status} />
+                    
+                    <main className="p-6">
+                        {/* Stats Cards Row */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <StatCard 
+                                title="Total Bans" 
+                                value={data.overview?.total_bans || 0} 
+                                icon="fas fa-shield-virus" 
+                                color="bg-gradient-to-br from-red-500 to-red-700"
+                                subtext="All time"
+                            />
+                            <StatCard 
+                                title="Today" 
+                                value={data.overview?.today_bans || 0} 
+                                icon="fas fa-calendar-day" 
+                                color="bg-gradient-to-br from-orange-500 to-orange-700"
+                                subtext="Last 24 hours"
+                            />
+                            <StatCard 
+                                title="This Week" 
+                                value={data.overview?.week_bans || 0} 
+                                icon="fas fa-calendar-week" 
+                                color="bg-gradient-to-br from-yellow-500 to-yellow-700"
+                                subtext="Last 7 days"
+                            />
+                            <StatCard 
+                                title="Active Countries" 
+                                value={data.overview?.top_countries?.length || 0} 
+                                icon="fas fa-globe-americas" 
+                                color="bg-gradient-to-br from-soc-cyan to-blue-600"
+                                subtext="Source countries"
+                            />
+                        </div>
+                        
+                        {/* Map and Heatmap Row */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                            <WorldMap data={data.heatmap_data?.heatmap} />
+                            <HeatmapPanel data={data.heatmap_data?.heatmap} />
+                        </div>
+                        
+                        {/* Charts Row */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                            <AttacksLineChart data={data.attacks_over_time?.data} />
+                            <TopCountriesBarChart data={data.top_countries} />
+                            <JailsPieChart data={data.overview?.jails} />
+                        </div>
+                        
+                        {/* Recent Bans Table */}
+                        <RecentBansTable data={data.banned_ips} loading={loading} />
+                        
+                        {/* Footer */}
+                        <footer className="mt-6 text-center text-gray-500 text-sm">
+                            <p>Fail2Ban SOC Dashboard &copy; 2026 | Powered by React & Leaflet</p>
+                        </footer>
+                    </main>
+                </div>
+            );
+        }
+        
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

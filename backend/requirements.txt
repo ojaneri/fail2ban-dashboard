@@ -1,0 +1,38 @@
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+websockets==12.0
+
+# Database
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# HTTP client for GeoIP
+aiohttp==3.9.1
+
+# JWT authentication
+python-jose[cryptography]==3.3.0
+
+# Password hashing
+passlib[bcrypt]==1.7.4
+
+# Date/time handling
+python-dateutil==2.8.2
+
+# Pydantic for data validation
+pydantic==2.5.3
+
+# Logging
+loguru==0.7.2
+
+# GeoIP (offline database)
+geoip2==4.8.0
+
+# Regex for parsing
+regex==2023.12.25
+
+# Async timeout
+async-timeout==5.0.1
+
+# Caching
+cachetools==5.3.2

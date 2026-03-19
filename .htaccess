@@ -1,0 +1,4 @@
+AuthType Basic
+AuthName "Área Restrita - Fail2Ban Dashboard"
+AuthUserFile /var/www/html/perito.digital/dashboard/.htpasswd
+Require valid-user

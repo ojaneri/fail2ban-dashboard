@@ -1,0 +1,29 @@
+# AI context and rules
+.clinerules
+memory-bank/
+GEMINI.md
+
+# Environment and Secrets
+.env
+*.log
+secrets.json
+.htpasswd
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.uv/
+
+# Node.js
+node_modules/
+dist/
+build/
+.npm
+.eslintcache
+
+# OS Files
+.DS_Store
+Thumbs.db
