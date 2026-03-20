@@ -2,3 +2,11 @@ AuthType Basic
 AuthName "Área Restrita - Fail2Ban Dashboard"
 AuthUserFile /var/www/html/perito.digital/dashboard/.htpasswd
 Require valid-user
+
+# Enable Rewrite Engine
+RewriteEngine On
+
+# Forward everything to the backend on port 8000
+# The backend now handles both the API and serving index.html
+RewriteRule ^$ http://localhost:8000/ [P,L]
+RewriteRule ^(.*)$ http://localhost:8000/$1 [P,L]

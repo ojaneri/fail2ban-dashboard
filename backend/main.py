@@ -9,8 +9,11 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
+import psutil
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -205,7 +208,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Background task for log parsing
 async def parse_logs_periodically(interval: int = 30):
     """Periodically parse Fail2Ban logs."""
@@ -290,6 +292,7 @@ async def broadcast_update(data: Dict[str, Any]):
 
 # WebSocket endpoint
 @app.websocket("/ws")
+@app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for real-time updates."""
     await websocket.accept()
@@ -315,14 +318,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # API Endpoints
-@app.get("/")
+@app.get("/api")
 async def root():
-    """Root endpoint."""
+    """Root API endpoint."""
     return {"message": "Fail2Ban SOC Dashboard API", "version": "1.0.0"}
 
 
 @app.get("/api/stats/overview")
-async def get_stats_overview():
+async def get_stats_overview(
+    days: Optional[int] = Query(None, ge=1)
+):
     """
     Get dashboard summary statistics.
     Returns total bans, today, this week, and top countries.
@@ -330,7 +335,10 @@ async def get_stats_overview():
     async with async_session_maker() as session:
         now = datetime.utcnow()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = now - timedelta(days=7)
+        
+        # Use provided days or default to 7
+        days_value = days if days else 7
+        period_start = now - timedelta(days=days_value)
         
         # Total bans
         result = await session.execute(
@@ -349,16 +357,16 @@ async def get_stats_overview():
         )
         today_bans = result.scalar() or 0
         
-        # This week's bans
+        # Period bans (based on days parameter)
         result = await session.execute(
             select(func.count(AttackLog.id)).where(
                 and_(
                     AttackLog.action == "Ban",
-                    AttackLog.timestamp >= week_start
+                    AttackLog.timestamp >= period_start
                 )
             )
         )
-        week_bans = result.scalar() or 0
+        period_bans = result.scalar() or 0
         
         # Active bans (currently banned)
         result = await session.execute(select(func.count(BannedIP.id)))
@@ -391,10 +399,13 @@ async def get_stats_overview():
                 "active_bans": row.active_bans
             })
         
+        period_label = f"{days_value} days" if days_value != 36500 else "All time"
+        
         return {
             "total_bans": total_bans,
             "today_bans": today_bans,
-            "week_bans": week_bans,
+            "period_bans": period_bans,
+            "period_label": period_label,
             "active_bans": active_bans,
             "top_countries": top_countries,
             "jails": jails,
@@ -405,14 +416,10 @@ async def get_stats_overview():
 @app.get("/api/stats/attacks-over-time")
 async def get_attacks_over_time(
     days: int = Query(7, ge=1, le=90),
-    interval: str = Query("hour", regex="^(hour|day)$")
+    interval: str = Query("hour", pattern="^(hour|day)$")
 ):
     """
     Get time series data for attacks over time.
-    
-    Args:
-        days: Number of days to look back
-        interval: Aggregation interval (hour or day)
     """
     async with async_session_maker() as session:
         start_date = datetime.utcnow() - timedelta(days=days)
@@ -456,9 +463,6 @@ async def get_top_attackers(
 ):
     """
     Get top attacking IP addresses.
-    
-    Args:
-        limit: Maximum number of results
     """
     async with async_session_maker() as session:
         query = select(
@@ -493,29 +497,56 @@ async def get_top_attackers(
 
 @app.get("/api/stats/top-countries")
 async def get_top_countries(
-    limit: int = Query(10, ge=1, le=50)
+    limit: int = Query(10, ge=1, le=50),
+    days: Optional[int] = Query(None, ge=1)
 ):
     """
     Get country breakdown of attacks.
-    
-    Args:
-        limit: Maximum number of results
     """
     async with async_session_maker() as session:
-        query = select(CountryStats).order_by(
-            desc(CountryStats.total_attacks)
-        ).limit(limit)
+        start_date = None
+        if days:
+            start_date = datetime.utcnow() - timedelta(days=days)
+        
+        if start_date:
+            query = select(
+                AttackLog.country,
+                AttackLog.country_name,
+                func.count(AttackLog.id).label("total_attacks"),
+                func.count(func.distinct(AttackLog.ip)).label("unique_ips")
+            ).where(
+                AttackLog.timestamp >= start_date
+            ).group_by(
+                AttackLog.country
+            ).order_by(
+                desc("total_attacks")
+            ).limit(limit)
+        else:
+            query = select(CountryStats).order_by(
+                desc(CountryStats.total_attacks)
+            ).limit(limit)
         
         result = await session.execute(query)
         countries = []
         
-        for row in result.scalars():
-            countries.append({
-                "country": row.country,
-                "country_name": row.country_name,
-                "total_attacks": row.total_attacks,
-                "unique_ips": row.unique_ips
-            })
+        try:
+            for row in result:
+                if hasattr(row, 'country'):  # CountryStats object
+                    countries.append({
+                        "country": row.country,
+                        "country_name": row.country_name,
+                        "total_attacks": row.total_attacks,
+                        "unique_ips": row.unique_ips
+                    })
+                else:  # Raw query result
+                    countries.append({
+                        "country": row[0],
+                        "country_name": row[1],
+                        "total_attacks": row[2],
+                        "unique_ips": row[3]
+                    })
+        except Exception:
+            pass
         
         return {
             "limit": limit,
@@ -524,26 +555,61 @@ async def get_top_countries(
 
 
 @app.get("/api/stats/heatmap-data")
-async def get_heatmap_data():
+async def get_heatmap_data(
+    days: Optional[int] = Query(None, ge=1)
+):
     """
     Get attack intensity data by country for map visualization.
     """
     async with async_session_maker() as session:
-        query = select(CountryStats).order_by(
-            desc(CountryStats.total_attacks)
-        )
+        start_date = None
+        if days:
+            start_date = datetime.utcnow() - timedelta(days=days)
+        
+        if start_date:
+            query = select(
+                AttackLog.country,
+                AttackLog.country_name,
+                func.count(AttackLog.id).label("total_attacks"),
+                func.count(func.distinct(AttackLog.ip)).label("unique_ips")
+            ).where(
+                AttackLog.timestamp >= start_date
+            ).group_by(
+                AttackLog.country
+            ).order_by(
+                desc("total_attacks")
+            )
+        else:
+            query = select(CountryStats).order_by(
+                desc(CountryStats.total_attacks)
+            )
         
         result = await session.execute(query)
         heatmap = []
         
-        for row in result.scalars():
-            heatmap.append({
-                "country": row.country,
-                "country_name": row.country_name,
-                "total_attacks": row.total_attacks,
-                "unique_ips": row.unique_ips,
-                "intensity": min(100, row.total_attacks / 10)  # Normalize to 0-100
-            })
+        # Check if we have CountryStats objects or raw query results
+        try:
+            for row in result:
+                if hasattr(row, 'country'):  # CountryStats object
+                    country_code = row.country
+                    country_name = row.country_name
+                    total = row.total_attacks
+                    unique = row.unique_ips
+                else:  # Raw query result
+                    country_code = row[0]
+                    country_name = row[1]
+                    total = row[2]
+                    unique = row[3]
+                
+                heatmap.append({
+                    "country": country_code,
+                    "country_name": country_name,
+                    "total_attacks": total,
+                    "unique_ips": unique,
+                    "intensity": min(100, total / 10)
+                })
+        except Exception:
+            pass
         
         return {
             "heatmap": heatmap
@@ -554,20 +620,31 @@ async def get_heatmap_data():
 async def get_banned_ips(
     jail: Optional[str] = Query(None),
     country: Optional[str] = Query(None),
+    days: Optional[int] = Query(None, ge=1),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0)
 ):
     """
     Get list of currently banned IPs.
-    
-    Args:
-        jail: Filter by jail name
-        country: Filter by country code
-        limit: Maximum number of results
-        offset: Offset for pagination
     """
     async with async_session_maker() as session:
-        query = select(BannedIP).order_by(desc(BannedIP.ban_timestamp))
+        # Apply time filter
+        time_filter = None
+        if days:
+            time_filter = datetime.utcnow() - timedelta(days=days)
+        
+        base_conditions = []
+        if jail:
+            base_conditions.append(BannedIP.jail == sanitize_jail(jail))
+        if country:
+            base_conditions.append(BannedIP.country == country.upper())
+        if time_filter:
+            base_conditions.append(BannedIP.ban_timestamp >= time_filter)
+        
+        if base_conditions:
+            query = select(BannedIP).where(and_(*base_conditions)).order_by(desc(BannedIP.ban_timestamp))
+        else:
+            query = select(BannedIP).order_by(desc(BannedIP.ban_timestamp))
         
         # Apply filters
         if jail:
@@ -607,7 +684,7 @@ async def get_banned_ips(
 async def get_logs(
     ip: Optional[str] = Query(None),
     jail: Optional[str] = Query(None),
-    action: Optional[str] = Query(None, regex="^(Ban|Unban)$"),
+    action: Optional[str] = Query(None, pattern="^(Ban|Unban)$"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
@@ -615,15 +692,6 @@ async def get_logs(
 ):
     """
     Queryable logs with filters.
-    
-    Args:
-        ip: Filter by IP address
-        jail: Filter by jail name
-        action: Filter by action type (Ban/Unban)
-        start_date: Filter by start date
-        end_date: Filter by end date
-        limit: Maximum number of results
-        offset: Offset for pagination
     """
     async with async_session_maker() as session:
         query = select(AttackLog).order_by(desc(AttackLog.timestamp))
@@ -682,6 +750,13 @@ async def refresh_data():
         return {"status": "no_log_file", "message": "No Fail2Ban log file found"}
     
     entries = await parse_log_file_async(log_path)
+    
+    if not entries:
+        return {
+            "status": "no_entries", 
+            "message": "No log entries found in file"
+        }
+    
     await process_parsed_entries(entries)
     
     return {
@@ -699,6 +774,37 @@ async def health_check():
         "active_websockets": len(websocket_connections)
     }
 
+
+@app.get("/api/stats/system")
+async def get_system_stats():
+    """
+    Get system CPU and memory usage.
+    """
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    memory = psutil.virtual_memory()
+    
+    return {
+        "cpu": {
+            "percent": cpu_percent,
+            "count": psutil.cpu_count()
+        },
+        "memory": {
+            "total": memory.total,
+            "available": memory.available,
+            "percent": memory.percent,
+            "used": memory.used
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# Serve the static frontend (index.html from root)
+@app.get("/")
+@app.get("/index.html")
+async def serve_index():
+    # Use absolute path: index.html is at /var/www/html/perito.digital/dashboard/index.html
+    # and this script is at /var/www/html/perito.digital/dashboard/backend/main.py
+    index_path = Path(__file__).parent.parent / "index.html"
+    return FileResponse(index_path)
 
 if __name__ == "__main__":
     import uvicorn

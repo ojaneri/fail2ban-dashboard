@@ -167,106 +167,113 @@
             'SA': [23.8859, 45.0792],
         };
         
-        // Demo data fallback
-        const demo_data = {
+        // Empty data structure
+        const empty_data = {
             overview: {
-                total_bans: 15420,
-                today_bans: 234,
-                week_bans: 1823,
-                active_bans: 892,
-                top_countries: [
-                    { country: 'CN', country_name: 'China', total_attacks: 4823, unique_ips: 1234 },
-                    { country: 'US', country_name: 'United States', total_attacks: 2156, unique_ips: 567 },
-                    { country: 'RU', country_name: 'Russia', total_attacks: 1892, unique_ips: 445 },
-                    { country: 'BR', country_name: 'Brazil', total_attacks: 1245, unique_ips: 312 },
-                    { country: 'VN', country_name: 'Vietnam', total_attacks: 987, unique_ips: 234 },
-                    { country: 'IN', country_name: 'India', total_attacks: 876, unique_ips: 198 },
-                    { country: 'UA', country_name: 'Ukraine', total_attacks: 765, unique_ips: 176 },
-                    { country: 'NL', country_name: 'Netherlands', total_attacks: 654, unique_ips: 143 },
-                    { country: 'DE', country_name: 'Germany', total_attacks: 543, unique_ips: 121 },
-                    { country: 'RO', country_name: 'Romania', total_attacks: 432, unique_ips: 98 },
-                ],
-                jails: [
-                    { jail: 'sshd', total_bans: 8234, active_bans: 456 },
-                    { jail: 'nginx-http-auth', total_bans: 3421, active_bans: 234 },
-                    { jail: 'nginx-noscript', total_bans: 2156, active_bans: 123 },
-                    { jail: 'recidive', total_bans: 876, active_bans: 45 },
-                    { jail: 'apache-badbots', total_bans: 543, active_bans: 23 },
-                    { jail: 'vsftpd', total_bans: 190, active_bans: 11 },
-                ]
+                total_bans: 0,
+                today_bans: 0,
+                week_bans: 0,
+                active_bans: 0,
+                top_countries: [],
+                jails: []
             },
-            attacks_over_time: {
-                data: [
-                    { period: '2026-03-13', count: 156 },
-                    { period: '2026-03-14', count: 189 },
-                    { period: '2026-03-15', count: 234 },
-                    { period: '2026-03-16', count: 198 },
-                    { period: '2026-03-17', count: 276 },
-                    { period: '2026-03-18', count: 312 },
-                    { period: '2026-03-19', count: 234 },
-                ]
-            },
-            top_countries: [
-                { country: 'CN', country_name: 'China', total_attacks: 4823, unique_ips: 1234 },
-                { country: 'US', country_name: 'United States', total_attacks: 2156, unique_ips: 567 },
-                { country: 'RU', country_name: 'Russia', total_attacks: 1892, unique_ips: 445 },
-                { country: 'BR', country_name: 'Brazil', total_attacks: 1245, unique_ips: 312 },
-                { country: 'VN', country_name: 'Vietnam', total_attacks: 987, unique_ips: 234 },
-                { country: 'IN', country_name: 'India', total_attacks: 876, unique_ips: 198 },
-                { country: 'UA', country_name: 'Ukraine', total_attacks: 765, unique_ips: 176 },
-                { country: 'NL', country_name: 'Netherlands', total_attacks: 654, unique_ips: 143 },
-                { country: 'DE', country_name: 'Germany', total_attacks: 543, unique_ips: 121 },
-                { country: 'RO', country_name: 'Romania', total_attacks: 432, unique_ips: 98 },
-            ],
-            heatmap_data: {
-                heatmap: [
-                    { country: 'CN', country_name: 'China', total_attacks: 4823, intensity: 100 },
-                    { country: 'US', country_name: 'United States', total_attacks: 2156, intensity: 45 },
-                    { country: 'RU', country_name: 'Russia', total_attacks: 1892, intensity: 39 },
-                    { country: 'BR', country_name: 'Brazil', total_attacks: 1245, intensity: 26 },
-                    { country: 'VN', country_name: 'Vietnam', total_attacks: 987, intensity: 20 },
-                    { country: 'IN', country_name: 'India', total_attacks: 876, intensity: 18 },
-                    { country: 'UA', country_name: 'Ukraine', total_attacks: 765, intensity: 16 },
-                    { country: 'NL', country_name: 'Netherlands', total_attacks: 654, intensity: 14 },
-                    { country: 'DE', country_name: 'Germany', total_attacks: 543, intensity: 11 },
-                    { country: 'RO', country_name: 'Romania', total_attacks: 432, intensity: 9 },
-                ]
-            },
-            banned_ips: {
-                total: 892,
-                ips: [
-                    { ip: '185.220.101.45', country: 'DE', country_name: 'Germany', jail: 'sshd', ban_timestamp: '2026-03-19T18:45:23', ban_count: 3 },
-                    { ip: '45.33.32.156', country: 'US', country_name: 'United States', jail: 'nginx-http-auth', ban_timestamp: '2026-03-19T18:32:11', ban_count: 1 },
-                    { ip: '91.121.87.10', country: 'FR', country_name: 'France', jail: 'sshd', ban_timestamp: '2026-03-19T18:28:45', ban_count: 7 },
-                    { ip: '123.45.67.89', country: 'CN', country_name: 'China', jail: 'nginx-noscript', ban_timestamp: '2026-03-19T18:15:33', ban_count: 2 },
-                    { ip: '89.248.167.131', country: 'NL', country_name: 'Netherlands', jail: 'recidive', ban_timestamp: '2026-03-19T18:02:19', ban_count: 12 },
-                    { ip: '194.26.29.102', country: 'RU', country_name: 'Russia', jail: 'sshd', ban_timestamp: '2026-03-19T17:55:44', ban_count: 5 },
-                    { ip: '51.68.11.215', country: 'PL', country_name: 'Poland', jail: 'apache-badbots', ban_timestamp: '2026-03-19T17:42:28', ban_count: 1 },
-                    { ip: '45.155.205.233', country: 'CN', country_name: 'China', jail: 'nginx-http-auth', ban_timestamp: '2026-03-19T17:38:12', ban_count: 4 },
-                    { ip: '185.220.101.78', country: 'DE', country_name: 'Germany', jail: 'sshd', ban_timestamp: '2026-03-19T17:25:56', ban_count: 2 },
-                    { ip: '23.129.64.130', country: 'US', country_name: 'United States', jail: 'recidive', ban_timestamp: '2026-03-19T17:12:33', ban_count: 8 },
-                    { ip: '162.247.74.27', country: 'US', country_name: 'United States', jail: 'sshd', ban_timestamp: '2026-03-19T17:05:18', ban_count: 6 },
-                    { ip: '91.92.109.43', country: 'RO', country_name: 'Romania', jail: 'nginx-noscript', ban_timestamp: '2026-03-19T16:58:42', ban_count: 3 },
-                ]
-            }
+            attacks_over_time: { data: [] },
+            top_countries: [],
+            heatmap_data: { heatmap: [] },
+            banned_ips: { total: 0, ips: [] }
         };
         
         // API functions
-        async function fetch_api(endpoint, fallback_data) {
+        // Fetch data from API (no fallback)
+        async function fetch_api(endpoint) {
             try {
-                const response = await fetch(`http://localhost:8000${endpoint}`, {
+                // Use /dashboard/api prefix since the app is served from /dashboard/
+                const baseUrl = '/dashboard';
+                const response = await fetch(`${baseUrl}${endpoint}`, {
                     headers: { 'Accept': 'application/json' }
                 });
                 if (!response.ok) throw new Error('API error');
-                return await response.json();
+                const data = await response.json();
+                return data;
             } catch (error) {
-                console.log(`Using demo data for ${endpoint}`);
-                return fallback_data;
+                console.error(`API error for ${endpoint}:`, error);
+                return null;
+            }
+        }
+        
+        // System Stats Gauge Component
+        function SystemGauge({ title, value, icon, color }) {
+            const radius = 40;
+            const circumference = 2 * Math.PI * radius;
+            const offset = circumference - (value / 100) * circumference;
+            const colorClass = value > 80 ? 'text-red-500' : value > 60 ? 'text-yellow-500' : color;
+            
+            return (
+                <div className="stat-card rounded-xl p-4 flex flex-col items-center">
+                    <p className="text-gray-400 text-sm mb-2">{title}</p>
+                    <div className="relative w-24 h-24">
+                        <svg className="w-full h-full transform -rotate-90">
+                            <circle
+                                cx="48" cy="48" r={radius}
+                                stroke="#2d3748" strokeWidth="8" fill="none"
+                            />
+                            <circle
+                                cx="48" cy="48" r={radius}
+                                stroke="currentColor" strokeWidth="8" fill="none"
+                                strokeLinecap="round"
+                                strokeDasharray={circumference}
+                                strokeDashoffset={offset}
+                                className={colorClass}
+                            />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-2xl font-bold text-white">{Math.round(value)}%</span>
+                        </div>
+                    </div>
+                    <i className={`${icon} mt-2 text-xl text-gray-400`}></i>
+                </div>
+            );
+        }
+
+        // WebSocket setup function
+        function setup_websocket(onMessage, onStatusChange) {
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                // Use /dashboard prefix for WebSocket
+                const ws_url = `${protocol}//${window.location.host}/dashboard/ws`;
+                
+                const socket = new WebSocket(ws_url);
+                
+                socket.onopen = () => {
+                    onStatusChange('connected');
+                };
+                
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        onMessage(data);
+                    } catch (e) {}
+                };
+                
+                socket.onclose = () => {
+                    onStatusChange('disconnected');
+                    // Retry after 10 seconds
+                    setTimeout(() => setup_websocket(onMessage, onStatusChange), 10000);
+                };
+                
+                socket.onerror = (error) => {
+                    // Silent error as we have polling fallback
+                    socket.close();
+                };
+                
+                return socket;
+            } catch (e) {
+                return { close: () => {} };
             }
         }
         
         // Header Component
-        function Header({ lastUpdate, status }) {
+        function Header({ lastUpdate, status, timeRange, setTimeRange, onRefresh }) {
             return (
                 <header className="bg-soc-panel border-b border-soc-border px-6 py-4">
                     <div className="flex items-center justify-between">
@@ -284,12 +291,29 @@
                         <div className="flex items-center gap-6">
                             <div className="text-right">
                                 <div className="flex items-center gap-2 justify-end">
-                                    <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-soc-green pulse-dot' : 'bg-soc-red'}`}></span>
-                                    <span className="text-sm text-gray-300">{status === 'connected' ? 'API Online' : 'Demo Mode'}</span>
+                                    <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-soc-green pulse-dot' : status === 'loading' ? 'bg-yellow-500' : status === 'no_data' ? 'bg-orange-500' : 'bg-soc-red'}`}></span>
+                                    <span className="text-sm text-gray-300">{status === 'connected' ? 'API Online' : status === 'loading' ? 'Carregando...' : status === 'no_data' ? 'Aguardando Dados' : 'Erro'}</span>
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">Last update: {lastUpdate}</p>
                             </div>
-                            <button className="bg-soc-cyan hover:bg-soc-cyan-dark text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+                            <select 
+                                value={timeRange} 
+                                onChange={(e) => {
+                                    setTimeRange(e.target.value);
+                                    fetch_all_data(e.target.value);
+                                }}
+                                className="bg-soc-card border border-soc-border text-white px-3 py-2 rounded-lg text-sm mr-2"
+                            >
+                                <option value="1">Today</option>
+                                <option value="7">7 Days</option>
+                                <option value="30">30 Days</option>
+                                <option value="90">90 Days</option>
+                                <option value="all">All Time</option>
+                            </select>
+                            <button 
+                                onClick={() => fetch_all_data(timeRange)}
+                                className="bg-soc-cyan hover:bg-soc-cyan-dark text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                            >
                                 <i className="fas fa-sync-alt"></i>
                                 Refresh
                             </button>
@@ -354,12 +378,15 @@
                     }
                 });
                 
-                // Add markers
-                data.forEach((country, index) => {
+                // Add markers (filter out null countries)
+                const validData = (data || []).filter(d => d.country && d.total_attacks);
+                const maxAttacks = Math.max(...validData.map(d => d.total_attacks || 0), 1);
+                
+                validData.forEach((country, index) => {
                     const coords = country_coordinates[country.country];
                     if (!coords) return;
                     
-                    const maxAttacks = Math.max(...data.map(d => d.total_attacks));
+                    const intensity = country.total_attacks / maxAttacks;
                     const intensity = country.total_attacks / maxAttacks;
                     const radius = 8 + (intensity * 25);
                     
@@ -422,7 +449,8 @@
         
         // Heatmap Panel Component
         function HeatmapPanel({ data }) {
-            if (!data || data.length === 0) {
+            // Safety check: ensure data exists and is an array
+            if (!data || !Array.isArray(data) || data.length === 0) {
                 return (
                     <div className="panel rounded-xl p-4">
                         <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
@@ -430,13 +458,13 @@
                             Attack Intensity Heatmap
                         </h3>
                         <div className="h-[300px] flex items-center justify-center text-gray-500">
-                            Sem dados
+                            Aguardando dados...
                         </div>
                     </div>
                 );
             }
             
-            const maxAttacks = Math.max(...data.map(d => d.total_attacks));
+            const maxAttacks = Math.max(...data.map(d => d.total_attacks || 1));
             
             return (
                 <div className="panel rounded-xl p-4">
@@ -445,8 +473,9 @@
                         Attack Intensity Heatmap
                     </h3>
                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
-                        {data.slice(0, 15).map((country, index) => {
-                            const percentage = (country.total_attacks / maxAttacks) * 100;
+                        {(data || []).filter(d => d.country_name).slice(0, 15).map((country, index) => {
+                            const total = country.total_attacks || 0;
+                            const percentage = (total / maxAttacks) * 100;
                             const color = `rgb(${Math.round(239 * (percentage / 100))}, ${Math.round(68 * (1 - percentage / 100))}, ${Math.round(68 * (1 - percentage / 100))})`;
                             
                             return (
@@ -462,7 +491,7 @@
                                             }}
                                         ></div>
                                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white font-mono">
-                                            {country.total_attacks.toLocaleString()}
+                                            {total.toLocaleString()}
                                         </span>
                                     </div>
                                 </div>
@@ -489,10 +518,10 @@
                 chartRef.current = new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: data.map(d => d.period),
+                        labels: (data || []).map(d => d.period || ''),
                         datasets: [{
                             label: 'Attacks',
-                            data: data.map(d => d.count),
+                            data: (data || []).map(d => d.count || 0),
                             borderColor: '#06b6d4',
                             backgroundColor: 'rgba(6, 182, 212, 0.1)',
                             borderWidth: 2,
@@ -559,10 +588,10 @@
                 chartRef.current = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: data.slice(0, 10).map(d => d.country_name.substring(0, 10)),
+                        labels: (data || []).filter(d => d.country_name).slice(0, 10).map(d => (d.country_name || 'N/A').substring(0, 10)),
                         datasets: [{
                             label: 'Attacks',
-                            data: data.slice(0, 10).map(d => d.total_attacks),
+                            data: (data || []).filter(d => d.country_name).slice(0, 10).map(d => d.total_attacks || 0),
                             backgroundColor: [
                                 '#ef4444',
                                 '#f97316',
@@ -634,9 +663,9 @@
                 chartRef.current = new Chart(ctx, {
                     type: 'doughnut',
                     data: {
-                        labels: data.slice(0, 5).map(d => d.jail),
+                        labels: (data || []).slice(0, 5).map(d => d.jail || 'unknown'),
                         datasets: [{
-                            data: data.slice(0, 5).map(d => d.total_bans),
+                            data: (data || []).slice(0, 5).map(d => d.total_bans || 0),
                             backgroundColor: [
                                 '#ef4444',
                                 '#f97316',
@@ -789,72 +818,217 @@
         // Main App Component
         function App() {
             const [loading, setLoading] = useState(true);
+            const [timeRange, setTimeRange] = useState('7'); // days: 1, 7, 30, 90, all
             const [error, setError] = useState(null);
             const [lastUpdate, setLastUpdate] = useState(format_current_time());
-            const [status, setStatus] = useState('demo');
+            const [status, setStatus] = useState('loading');
             const [data, setData] = useState({
                 overview: null,
                 attacks_over_time: null,
                 top_countries: null,
                 heatmap_data: null,
-                banned_ips: null
+                banned_ips: null,
+                system: null
             });
             
-            const fetch_all_data = async () => {
+            // Individual fetch functions for segmented polling
+            const fetch_overview = async () => {
+                try {
+                    const overview = await fetch_api('/api/stats/overview');
+                    if (overview) {
+                        setData(prev => ({ ...prev, overview }));
+                        setStatus('connected');
+                    }
+                } catch (err) {
+                    console.error('Error fetching overview:', err);
+                }
+            };
+            
+            const fetch_banned_ips = async () => {
+                try {
+                    const bannedIps = await fetch_api('/api/banned-ips?limit=20');
+                    if (bannedIps) {
+                        setData(prev => ({ ...prev, banned_ips: bannedIps }));
+                        setStatus('connected');
+                    }
+                } catch (err) {
+                    console.error('Error fetching banned IPs:', err);
+                }
+            };
+            
+            const fetch_attacks_over_time = async () => {
+                try {
+                    const attacksOverTime = await fetch_api('/api/stats/attacks-over-time?days=7&interval=day');
+                    if (attacksOverTime) {
+                        setData(prev => ({ ...prev, attacks_over_time: attacksOverTime }));
+                        setStatus('connected');
+                    }
+                } catch (err) {
+                    console.error('Error fetching attacks over time:', err);
+                }
+            };
+            
+            const fetch_top_countries = async () => {
+                try {
+                    const topCountries = await fetch_api('/api/stats/top-countries?limit=10');
+                    if (topCountries) {
+                        setData(prev => ({ ...prev, top_countries: topCountries }));
+                        setStatus('connected');
+                    }
+                } catch (err) {
+                    console.error('Error fetching top countries:', err);
+                }
+            };
+            
+            const fetch_heatmap_data = async () => {
+                try {
+                    const heatmapData = await fetch_api('/api/stats/heatmap-data');
+                    if (heatmapData) {
+                        setData(prev => ({ ...prev, heatmap_data: heatmapData }));
+                        setStatus('connected');
+                    }
+                } catch (err) {
+                    console.error('Error fetching heatmap data:', err);
+                }
+            };
+            
+            const fetch_system_stats = async () => {
+                try {
+                    const systemData = await fetch_api('/api/stats/system');
+                    if (systemData) {
+                        setData(prev => ({ ...prev, system: systemData }));
+                    }
+                } catch (err) {
+                    console.error('Error fetching system data:', err);
+                }
+            };
+            
+            // Combined fetch for initial load
+            const fetch_all_data = async (days = timeRange) => {
                 try {
                     setLoading(true);
                     
-                    // Try to fetch from API
+                    // Handle 'all' as a very large number
+                    const daysParam = days === 'all' ? '36500' : days;
+                    
                     const [overview, attacksOverTime, topCountries, heatmapData, bannedIps] = await Promise.all([
-                        fetch_api('/api/stats/overview', demo_data.overview),
-                        fetch_api('/api/stats/attacks-over-time?days=7&interval=day', demo_data.attacks_over_time),
-                        fetch_api('/api/stats/top-countries?limit=10', demo_data.top_countries),
-                        fetch_api('/api/stats/heatmap-data', demo_data.heatmap_data),
-                        fetch_api('/api/banned-ips?limit=20', demo_data.banned_ips)
+                        fetch_api(`/api/stats/overview?days=${daysParam}`),
+                        fetch_api(`/api/stats/attacks-over-time?days=${daysParam}&interval=day`),
+                        fetch_api(`/api/stats/top-countries?limit=10&days=${daysParam}`),
+                        fetch_api(`/api/stats/heatmap-data?days=${daysParam}`),
+                        fetch_api(`/api/banned-ips?limit=20&days=${daysParam}`)
                     ]);
                     
-                    setData({
-                        overview,
-                        attacks_over_time: attacksOverTime,
-                        top_countries: topCountries,
-                        heatmap_data: heatmapData,
-                        banned_ips: bannedIps
-                    });
+                    console.log('API Response - overview:', overview);
+                    console.log('API Response - bannedIps:', bannedIps);
                     
-                    setStatus('connected');
+                    // Only update data if we got valid responses
+                    if (overview && overview.total_bans > 0) {
+                        setData(prev => ({ ...prev, overview }));
+                        setStatus('connected');
+                    } else {
+                        setStatus('no_data');
+                    }
+                    if (attacksOverTime) setData(prev => ({ ...prev, attacks_over_time: attacksOverTime }));
+                    if (topCountries) setData(prev => ({ ...prev, top_countries: topCountries }));
+                    if (heatmapData) setData(prev => ({ ...prev, heatmap_data: heatmapData }));
+                    if (bannedIps) setData(prev => ({ ...prev, banned_ips: bannedIps }));
+                    
                     setLastUpdate(format_current_time());
                     setError(null);
                 } catch (err) {
                     console.error('Error fetching data:', err);
-                    setError(err.message);
-                    // Use demo data on error
-                    setData({
-                        overview: demo_data.overview,
-                        attacks_over_time: demo_data.attacks_over_time,
-                        top_countries: demo_data.top_countries,
-                        heatmap_data: demo_data.heatmap_data,
-                        banned_ips: demo_data.banned_ips
-                    });
-                    setStatus('demo');
+                    // Keep previous status if we have data, otherwise show no_data
+                    if (!data.overview) {
+                        setStatus('no_data');
+                    }
+                    // Don't show error if we have data from before
                 } finally {
                     setLoading(false);
                 }
             };
             
             useEffect(() => {
+                // Initial fetch
                 fetch_all_data();
                 
-                // Auto-refresh every 30 seconds
-                const interval = setInterval(fetch_all_data, 30000);
+                // Set up WebSocket for real-time updates
+                const socket = setup_websocket((message) => {
+                    if (message.type === 'new_entries') {
+                        // Refresh critical data on update
+                        fetch_overview();
+                        fetch_banned_ips();
+                    }
+                }, setStatus);
                 
-                return () => clearInterval(interval);
+                // Segmented polling as fallback and for less critical data:
+                // - 10 seconds for overview (main statistics)
+                // - 15 seconds for heatmap and top countries
+                // - 30 seconds for attacks over time (aggregated data)
+                const intervalOverview = setInterval(fetch_overview, 10000);
+                const intervalTopCountries = setInterval(fetch_top_countries, 15000);
+                const intervalHeatmap = setInterval(fetch_heatmap_data, 15000);
+                const intervalAttacks = setInterval(fetch_attacks_over_time, 30000);
+                const intervalSystem = setInterval(fetch_system_stats, 5000); // Update every 5 seconds
+                
+                // Update timestamp every 10 seconds
+                const intervalTimestamp = setInterval(() => {
+                    setLastUpdate(format_current_time());
+                }, 10000);
+                
+                // Initial system stats fetch
+                fetch_system_stats();
+                
+                return () => {
+                    socket.close();
+                    clearInterval(intervalOverview);
+                    clearInterval(intervalTopCountries);
+                    clearInterval(intervalHeatmap);
+                    clearInterval(intervalAttacks);
+                    clearInterval(intervalSystem);
+                    clearInterval(intervalTimestamp);
+                };
             }, []);
+            
+            if (error && !data.overview) {
+                return (
+                    <div className="min-h-screen bg-soc-dark flex flex-col items-center justify-center p-6">
+                        <div className="w-16 h-16 bg-soc-red rounded-lg flex items-center justify-center mb-6 glow-red">
+                            <i className="fas fa-exclamation-triangle text-2xl text-white"></i>
+                        </div>
+                        <h1 className="text-2xl font-bold text-white mb-2">Connection Error</h1>
+                        <p className="text-gray-400 mb-6 text-center max-w-md">{error}</p>
+                        <button 
+                            onClick={fetch_all_data}
+                            className="bg-soc-cyan hover:bg-soc-cyan-dark text-white px-6 py-2 rounded-lg transition-colors"
+                        >
+                            Retry Connection
+                        </button>
+                    </div>
+                );
+            }
             
             return (
                 <div className="min-h-screen">
-                    <Header lastUpdate={lastUpdate} status={status} />
+                    <Header lastUpdate={lastUpdate} status={status} timeRange={timeRange} setTimeRange={setTimeRange} onRefresh={() => fetch_all_data()} />
                     
                     <main className="p-6">
+                        {/* System Stats Row */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <SystemGauge 
+                                title="CPU Usage" 
+                                value={data.system?.cpu?.percent || 0} 
+                                icon="fas fa-microchip" 
+                                color="text-soc-cyan"
+                            />
+                            <SystemGauge 
+                                title="Memory Usage" 
+                                value={data.system?.memory?.percent || 0} 
+                                icon="fas fa-memory" 
+                                color="text-soc-cyan"
+                            />
+                        </div>
+                        
                         {/* Stats Cards Row */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                             <StatCard 
@@ -872,15 +1046,15 @@
                                 subtext="Last 24 hours"
                             />
                             <StatCard 
-                                title="This Week" 
-                                value={data.overview?.week_bans || 0} 
+                                title={data.overview?.period_label || 'Period'} 
+                                value={data.overview?.period_bans || 0} 
                                 icon="fas fa-calendar-week" 
                                 color="bg-gradient-to-br from-yellow-500 to-yellow-700"
-                                subtext="Last 7 days"
+                                subtext="Filtered period"
                             />
                             <StatCard 
                                 title="Active Countries" 
-                                value={data.overview?.top_countries?.length || 0} 
+                                value={data.overview?.top_countries?.length || data.top_countries?.countries?.length || 0} 
                                 icon="fas fa-globe-americas" 
                                 color="bg-gradient-to-br from-soc-cyan to-blue-600"
                                 subtext="Source countries"
@@ -889,19 +1063,19 @@
                         
                         {/* Map and Heatmap Row */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                            <WorldMap data={data.heatmap_data?.heatmap} />
-                            <HeatmapPanel data={data.heatmap_data?.heatmap} />
+                            <WorldMap data={data.heatmap_data?.heatmap || data.heatmap_data || []} />
+                            <HeatmapPanel data={data.heatmap_data?.heatmap || data.heatmap_data || []} />
                         </div>
                         
                         {/* Charts Row */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                            <AttacksLineChart data={data.attacks_over_time?.data} />
-                            <TopCountriesBarChart data={data.top_countries} />
-                            <JailsPieChart data={data.overview?.jails} />
+                            <AttacksLineChart data={data.attacks_over_time?.data || []} />
+                            <TopCountriesBarChart data={data.top_countries?.countries || data.top_countries || []} />
+                            <JailsPieChart data={data.overview?.jails || []} />
                         </div>
                         
                         {/* Recent Bans Table */}
-                        <RecentBansTable data={data.banned_ips} loading={loading} />
+                        <RecentBansTable data={data.banned_ips?.ips ? { ips: data.banned_ips.ips } : data.banned_ips} loading={loading} />
                         
                         {/* Footer */}
                         <footer className="mt-6 text-center text-gray-500 text-sm">
