@@ -4,7 +4,7 @@ Supports both offline database and online API fallback.
 """
 import asyncio
 import ipaddress
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from functools import lru_cache
 import aiohttp
 from cachetools import TTLCache
@@ -14,6 +14,7 @@ _geoip_cache: TTLCache = TTLCache(maxsize=10000, ttl=86400)
 
 # Online GeoIP service (free tier)
 _GEOIP_API_URL = "http://ip-api.com/json/{ip}?fields=status,countryCode,country"
+_GEOIP_BATCH_URL = "http://ip-api.com/batch?fields=status,countryCode,country,query"
 
 
 class GeoIPError(Exception):
@@ -156,6 +157,49 @@ def get_country_code(ip: str) -> Tuple[Optional[str], Optional[str]]:
     except RuntimeError:
         # If no event loop exists, create one
         return asyncio.run(get_country_code_async(ip))
+
+
+async def get_country_codes_batch(ips: List[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """
+    Batch GeoIP lookup for up to 100 IPs per call (ip-api.com batch endpoint).
+    Returns dict of ip -> (country_code, country_name).
+    """
+    results: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    valid_ips = [ip for ip in ips if validate_ip(ip) and ip not in _geoip_cache]
+
+    # Process in batches of 100 (ip-api.com limit)
+    for i in range(0, len(valid_ips), 100):
+        batch = valid_ips[i:i + 100]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    _GEOIP_BATCH_URL,
+                    json=[{"query": ip} for ip in batch],
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        for entry in data:
+                            ip = entry.get("query", "")
+                            if entry.get("status") == "success":
+                                cc = entry.get("countryCode")
+                                cn = entry.get("country")
+                                _geoip_cache[ip] = {"country_code": cc, "country_name": cn}
+                                results[ip] = (cc, cn)
+                            else:
+                                results[ip] = (None, None)
+        except Exception:
+            # On failure, mark all in this batch as unknown
+            for ip in batch:
+                results[ip] = (None, None)
+
+    # Also return cached results for IPs already in cache
+    for ip in ips:
+        if ip in _geoip_cache and ip not in results:
+            cached = _geoip_cache[ip]
+            results[ip] = (cached["country_code"], cached["country_name"])
+
+    return results
 
 
 def clear_cache() -> None:

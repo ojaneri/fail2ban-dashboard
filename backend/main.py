@@ -29,7 +29,7 @@ from parser import (
     sanitize_ip,
     sanitize_jail
 )
-from geoip import get_country_code_async, validate_ip
+from geoip import get_country_code_async, get_country_codes_batch, validate_ip
 
 
 # Database configuration
@@ -273,7 +273,7 @@ async def process_parsed_entries(entries: List):
         )
         existing_set = {(r.ip, r.jail, r.timestamp, r.action) for r in existing_result}
 
-        # Pre-load country data already stored in DB (in the same time range) to avoid API calls
+        # Pre-load country data from DB for this time range
         known_geoip: Dict[str, tuple] = {}
         geoip_rows = await session.execute(
             select(AttackLog.ip, AttackLog.country, AttackLog.country_name)
@@ -283,6 +283,15 @@ async def process_parsed_entries(entries: List):
         )
         for row in geoip_rows:
             known_geoip[row.ip] = (row.country, row.country_name)
+
+        # Batch geoip lookup for IPs not yet known
+        unknown_ips = [
+            e.ip for e in entries
+            if validate_ip(e.ip) and e.ip not in known_geoip
+        ]
+        if unknown_ips:
+            batch_results = await get_country_codes_batch(list(set(unknown_ips)))
+            known_geoip.update(batch_results)
 
         for entry in entries:
             if not validate_ip(entry.ip):
@@ -295,13 +304,7 @@ async def process_parsed_entries(entries: List):
                 continue
             existing_set.add(key)
 
-            # Reuse cached country data; only call API for truly unknown IPs
-            if entry.ip in known_geoip:
-                country_code, country_name = known_geoip[entry.ip]
-            else:
-                country_code, country_name = await get_country_code_async(entry.ip)
-                if country_code:
-                    known_geoip[entry.ip] = (country_code, country_name)
+            country_code, country_name = known_geoip.get(entry.ip, (None, None))
 
             log_entry = AttackLog(
                 ip=entry.ip,

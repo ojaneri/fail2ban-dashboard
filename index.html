@@ -126,7 +126,7 @@
     <div id="root"></div>
     
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
         
         // Country coordinates mapping
         const country_coordinates = {
@@ -565,7 +565,7 @@
         }
         
         // Line Chart Component
-        function AttacksLineChart({ data }) {
+        function AttacksLineChart({ data, timeRange }) {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
             
@@ -625,7 +625,7 @@
                 <div className="panel rounded-xl p-4">
                     <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
                         <i className="fas fa-chart-line text-soc-cyan"></i>
-                        Attacks Over Time (7 Days)
+                        Attacks Over Time ({timeRange === 'all' ? 'All Time' : timeRange === '1' ? 'Today' : `${timeRange} Days`})
                     </h3>
                     <div className="h-[250px]">
                         <canvas ref={canvasRef}></canvas>
@@ -1081,6 +1081,17 @@
             const [lastUpdate, setLastUpdate] = useState(format_current_time());
             const [status, setStatus] = useState('loading');
             const [selectedIP, setSelectedIP] = useState(null);
+
+            // Ref always holds the latest timeRange — intervals read from this
+            const timeRangeRef = useRef('7');
+
+            // Stable refs to latest polling functions (avoids stale closure in setInterval)
+            const pollOverviewRef = useRef(null);
+            const pollBannedRef = useRef(null);
+            const pollAttacksRef = useRef(null);
+            const pollCountriesRef = useRef(null);
+            const pollHeatmapRef = useRef(null);
+            const pollSystemRef = useRef(null);
             const [data, setData] = useState({
                 overview: null,
                 attacks_over_time: null,
@@ -1091,85 +1102,70 @@
             });
             
             // Individual fetch functions for segmented polling
-            const fetch_overview = async () => {
-                try {
-                    const overview = await fetch_api('/api/stats/overview');
-                    if (overview) {
-                        setData(prev => ({ ...prev, overview }));
-                        setStatus('connected');
-                    }
-                } catch (err) {
-                    console.error('Error fetching overview:', err);
-                }
-            };
-            
-            const fetch_banned_ips = async () => {
-                try {
-                    const bannedIps = await fetch_api('/api/banned-ips?limit=20');
-                    if (bannedIps) {
-                        setData(prev => ({ ...prev, banned_ips: bannedIps }));
-                        setStatus('connected');
-                    }
-                } catch (err) {
-                    console.error('Error fetching banned IPs:', err);
-                }
-            };
-            
-            const fetch_attacks_over_time = async (days = timeRange) => {
-                try {
-                    const daysParam = days === 'all' ? '36500' : days;
-                    const attacksOverTime = await fetch_api(`/api/stats/attacks-over-time?days=${daysParam}&interval=day`);
-                    if (attacksOverTime) {
-                        setData(prev => ({ ...prev, attacks_over_time: attacksOverTime }));
-                        setStatus('connected');
-                    }
-                } catch (err) {
-                    console.error('Error fetching attacks over time:', err);
-                }
-            };
+            // Keep timeRangeRef in sync with state so intervals always read the latest value
+            timeRangeRef.current = timeRange;
 
-            const fetch_top_countries = async (days = timeRange) => {
-                try {
-                    const daysParam = days === 'all' ? '36500' : days;
-                    const topCountries = await fetch_api(`/api/stats/top-countries?limit=10&days=${daysParam}`);
-                    if (topCountries) {
-                        setData(prev => ({ ...prev, top_countries: topCountries }));
-                        setStatus('connected');
-                    }
-                } catch (err) {
-                    console.error('Error fetching top countries:', err);
-                }
-            };
+            const dp = (d) => (d === 'all' ? '36500' : d);
 
-            const fetch_heatmap_data = async (days = timeRange) => {
+            const fetch_overview = async (days) => {
+                const d = dp(days !== undefined ? days : timeRangeRef.current);
                 try {
-                    const daysParam = days === 'all' ? '36500' : days;
-                    const heatmapData = await fetch_api(`/api/stats/heatmap-data?days=${daysParam}`);
-                    if (heatmapData) {
-                        setData(prev => ({ ...prev, heatmap_data: heatmapData }));
-                        setStatus('connected');
-                    }
-                } catch (err) {
-                    console.error('Error fetching heatmap data:', err);
-                }
+                    const overview = await fetch_api(`/api/stats/overview?days=${d}`);
+                    if (overview) { setData(prev => ({ ...prev, overview })); setStatus('connected'); }
+                } catch (err) {}
             };
-            
+            pollOverviewRef.current = fetch_overview;
+
+            const fetch_banned_ips = async (days) => {
+                const d = dp(days !== undefined ? days : timeRangeRef.current);
+                try {
+                    const bannedIps = await fetch_api(`/api/banned-ips?limit=20&days=${d}`);
+                    if (bannedIps) { setData(prev => ({ ...prev, banned_ips: bannedIps })); setStatus('connected'); }
+                } catch (err) {}
+            };
+            pollBannedRef.current = fetch_banned_ips;
+
+            const fetch_attacks_over_time = async (days) => {
+                const d = dp(days !== undefined ? days : timeRangeRef.current);
+                try {
+                    const attacksOverTime = await fetch_api(`/api/stats/attacks-over-time?days=${d}&interval=day`);
+                    if (attacksOverTime) { setData(prev => ({ ...prev, attacks_over_time: attacksOverTime })); setStatus('connected'); }
+                } catch (err) {}
+            };
+            pollAttacksRef.current = fetch_attacks_over_time;
+
+            const fetch_top_countries = async (days) => {
+                const d = dp(days !== undefined ? days : timeRangeRef.current);
+                try {
+                    const topCountries = await fetch_api(`/api/stats/top-countries?limit=10&days=${d}`);
+                    if (topCountries) { setData(prev => ({ ...prev, top_countries: topCountries })); setStatus('connected'); }
+                } catch (err) {}
+            };
+            pollCountriesRef.current = fetch_top_countries;
+
+            const fetch_heatmap_data = async (days) => {
+                const d = dp(days !== undefined ? days : timeRangeRef.current);
+                try {
+                    const heatmapData = await fetch_api(`/api/stats/heatmap-data?days=${d}`);
+                    if (heatmapData) { setData(prev => ({ ...prev, heatmap_data: heatmapData })); setStatus('connected'); }
+                } catch (err) {}
+            };
+            pollHeatmapRef.current = fetch_heatmap_data;
+
             const fetch_system_stats = async () => {
                 try {
                     const systemData = await fetch_api('/api/stats/system');
-                    if (systemData) {
-                        setData(prev => ({ ...prev, system: systemData }));
-                    }
-                } catch (err) {
-                    console.error('Error fetching system data:', err);
-                }
+                    if (systemData) { setData(prev => ({ ...prev, system: systemData })); }
+                } catch (err) {}
             };
+            pollSystemRef.current = fetch_system_stats;
             
             // Combined fetch for initial load
-            const fetch_all_data = async (days = timeRange) => {
+            const fetch_all_data = async (days = timeRangeRef.current) => {
+                timeRangeRef.current = days;
                 try {
                     setLoading(true);
-                    
+
                     // Handle 'all' as a very large number
                     const daysParam = days === 'all' ? '36500' : days;
                     
@@ -1208,42 +1204,32 @@
             };
             
             useEffect(() => {
-                // Initial fetch
                 fetch_all_data();
-                
-                // Set up WebSocket for real-time updates
+                fetch_system_stats();
+
                 const socket = setup_websocket((message) => {
                     if (message.type === 'new_entries') {
-                        // Refresh critical data on update
-                        fetch_overview();
-                        fetch_banned_ips();
+                        pollOverviewRef.current();
+                        pollBannedRef.current();
                     }
                 }, setStatus);
-                
-                // Segmented polling as fallback and for less critical data:
-                // - 10 seconds for overview (main statistics)
-                // - 15 seconds for heatmap and top countries
-                // - 30 seconds for attacks over time (aggregated data)
-                const intervalOverview = setInterval(fetch_overview, 10000);
-                const intervalTopCountries = setInterval(fetch_top_countries, 15000);
-                const intervalHeatmap = setInterval(fetch_heatmap_data, 15000);
-                const intervalAttacks = setInterval(fetch_attacks_over_time, 30000);
-                const intervalSystem = setInterval(fetch_system_stats, 5000); // Update every 5 seconds
-                
-                // Update timestamp every 10 seconds
-                const intervalTimestamp = setInterval(() => {
-                    setLastUpdate(format_current_time());
-                }, 10000);
-                
-                // Initial system stats fetch
-                fetch_system_stats();
-                
+
+                // Intervals call via ref — always use the latest closure with current timeRange
+                const intervalOverview   = setInterval(() => pollOverviewRef.current(),  10000);
+                const intervalCountries  = setInterval(() => pollCountriesRef.current(),  15000);
+                const intervalHeatmap    = setInterval(() => pollHeatmapRef.current(),    15000);
+                const intervalAttacks    = setInterval(() => pollAttacksRef.current(),    30000);
+                const intervalBanned     = setInterval(() => pollBannedRef.current(),     30000);
+                const intervalSystem     = setInterval(() => pollSystemRef.current(),      5000);
+                const intervalTimestamp  = setInterval(() => setLastUpdate(format_current_time()), 10000);
+
                 return () => {
                     socket.close();
                     clearInterval(intervalOverview);
-                    clearInterval(intervalTopCountries);
+                    clearInterval(intervalCountries);
                     clearInterval(intervalHeatmap);
                     clearInterval(intervalAttacks);
+                    clearInterval(intervalBanned);
                     clearInterval(intervalSystem);
                     clearInterval(intervalTimestamp);
                 };
@@ -1345,7 +1331,7 @@
                         
                         {/* Charts Row */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                            <AttacksLineChart data={data.attacks_over_time?.data || []} />
+                            <AttacksLineChart data={data.attacks_over_time?.data || []} timeRange={timeRange} />
                             <TopCountriesBarChart data={data.top_countries?.countries || data.top_countries || []} />
                             <JailsPieChart data={data.overview?.jails || []} />
                         </div>
