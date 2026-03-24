@@ -22,8 +22,9 @@ import async_timeout
 # Local imports
 from models import Base, AttackLog, CountryStats, BannedIP, JailStats
 from parser import (
-    parse_log_file_async, 
-    find_log_path, 
+    parse_log_file_async,
+    parse_all_logs_async,
+    find_log_path,
     generate_demo_data,
     sanitize_ip,
     sanitize_jail
@@ -39,6 +40,7 @@ engine = None
 async_session_maker = None
 websocket_connections: List[WebSocket] = []
 background_task: Optional[asyncio.Task] = None
+_last_processed_timestamp: Optional[datetime] = None
 
 
 @asynccontextmanager
@@ -61,12 +63,9 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
-    # Start background log parser
+    # Start background log parser (also handles initial historical import)
     background_task = asyncio.create_task(parse_logs_periodically())
-    
-    # Check if we have real log data, don't seed demo data
-    # await seed_demo_data_if_empty()
-    
+
     yield
     
     # Shutdown
@@ -127,19 +126,20 @@ async def update_country_stats(session: AsyncSession, country_code: str, country
         select(CountryStats).where(CountryStats.country == country_code)
     )
     stats = result.scalar_one_or_none()
-    
+
     if stats:
         stats.total_attacks += 1
-        stats.last_updated = datetime.utcnow()
+        stats.last_updated = datetime.now()
     else:
         stats = CountryStats(
             country=country_code,
             country_name=country_name or "Unknown",
             total_attacks=1,
             unique_ips=1,
-            last_updated=datetime.utcnow()
+            last_updated=datetime.now()
         )
         session.add(stats)
+        await session.flush()
 
 
 async def update_jail_stats(session: AsyncSession, jail: str, action: str):
@@ -149,32 +149,33 @@ async def update_jail_stats(session: AsyncSession, jail: str, action: str):
         select(JailStats).where(JailStats.jail == jail)
     )
     stats = result.scalar_one_or_none()
-    
+
     if stats:
         stats.total_bans += 1
         if action == "Ban":
             stats.active_bans += 1
         elif action == "Unban" and stats.active_bans > 0:
             stats.active_bans -= 1
-        stats.last_updated = datetime.utcnow()
+        stats.last_updated = datetime.now()
     else:
         stats = JailStats(
             jail=jail,
             total_bans=1,
             active_bans=1 if action == "Ban" else 0,
-            last_updated=datetime.utcnow()
+            last_updated=datetime.now()
         )
         session.add(stats)
+        await session.flush()
 
 
-async def update_banned_ips(session: AsyncSession, ip: str, jail: str, timestamp: datetime, 
+async def update_banned_ips(session: AsyncSession, ip: str, jail: str, timestamp: datetime,
                             country_code: Optional[str], country_name: Optional[str]):
     """Update banned IPs tracking."""
     result = await session.execute(
         select(BannedIP).where(BannedIP.ip == ip)
     )
     banned = result.scalar_one_or_none()
-    
+
     if banned:
         banned.ban_count += 1
         banned.ban_timestamp = timestamp
@@ -189,6 +190,7 @@ async def update_banned_ips(session: AsyncSession, ip: str, jail: str, timestamp
             ban_count=1
         )
         session.add(banned)
+        await session.flush()
 
 
 # Create FastAPI app
@@ -210,66 +212,119 @@ app.add_middleware(
 
 # Background task for log parsing
 async def parse_logs_periodically(interval: int = 30):
-    """Periodically parse Fail2Ban logs."""
+    """Periodically parse Fail2Ban logs. On first run, imports all historical logs."""
+    global _last_processed_timestamp
+    first_run = True
+
     while True:
         try:
-            async with async_timeout.timeout(25):
-                log_path = find_log_path()
-                
-                if log_path:
-                    entries = await parse_log_file_async(log_path)
-                    
-                    if entries:
-                        await process_parsed_entries(entries)
-                        await broadcast_update({"type": "new_entries", "count": len(entries)})
+            if first_run:
+                # Import all logs (including rotated/gzipped) on first run
+                print("Importando logs históricos do fail2ban (background)...")
+                entries = await parse_all_logs_async()
+                first_run = False
+            else:
+                async with async_timeout.timeout(25):
+                    log_path = find_log_path()
+                    entries = await parse_log_file_async(log_path) if log_path else []
+
+            if entries:
+                if _last_processed_timestamp is not None:
+                    new_entries = [e for e in entries if e.timestamp > _last_processed_timestamp]
                 else:
-                    # No log file found, just wait
-                    pass
-                    
+                    new_entries = entries
+
+                if new_entries:
+                    # Process in chunks to avoid giant SQLite sessions
+                    CHUNK = 500
+                    total = 0
+                    for i in range(0, len(new_entries), CHUNK):
+                        chunk = new_entries[i:i + CHUNK]
+                        await process_parsed_entries(chunk)
+                        total += len(chunk)
+
+                    _last_processed_timestamp = max(e.timestamp for e in new_entries)
+                    print(f"Processadas {total} entradas do fail2ban.")
+                    await broadcast_update({"type": "new_entries", "count": total})
+                elif _last_processed_timestamp is None and entries:
+                    _last_processed_timestamp = max(e.timestamp for e in entries)
+
         except asyncio.CancelledError:
             break
         except Exception as e:
             print(f"Error parsing logs: {e}")
-        
+
         await asyncio.sleep(interval)
 
 
 async def process_parsed_entries(entries: List):
     """Process parsed log entries and store in database."""
+    if not entries:
+        return
+
     async with async_session_maker() as session:
+        # Load existing entries in the time range of this batch to skip duplicates
+        # (avoids SQLite IN-clause limit with thousands of timestamps)
+        min_ts = min(e.timestamp for e in entries)
+        max_ts = max(e.timestamp for e in entries)
+        existing_result = await session.execute(
+            select(AttackLog.ip, AttackLog.jail, AttackLog.timestamp, AttackLog.action)
+            .where(AttackLog.timestamp >= min_ts, AttackLog.timestamp <= max_ts)
+        )
+        existing_set = {(r.ip, r.jail, r.timestamp, r.action) for r in existing_result}
+
+        # Pre-load country data already stored in DB (in the same time range) to avoid API calls
+        known_geoip: Dict[str, tuple] = {}
+        geoip_rows = await session.execute(
+            select(AttackLog.ip, AttackLog.country, AttackLog.country_name)
+            .where(AttackLog.timestamp >= min_ts, AttackLog.timestamp <= max_ts,
+                   AttackLog.country.isnot(None))
+            .distinct()
+        )
+        for row in geoip_rows:
+            known_geoip[row.ip] = (row.country, row.country_name)
+
         for entry in entries:
-            # Validate IP
             if not validate_ip(entry.ip):
                 continue
-            
-            # Get country
-            country_code, country_name = await get_country_code_async(entry.ip)
-            
-            # Create log entry
+
+            jail = sanitize_jail(entry.jail)
+            key = (entry.ip, jail, entry.timestamp, entry.action)
+
+            if key in existing_set:
+                continue
+            existing_set.add(key)
+
+            # Reuse cached country data; only call API for truly unknown IPs
+            if entry.ip in known_geoip:
+                country_code, country_name = known_geoip[entry.ip]
+            else:
+                country_code, country_name = await get_country_code_async(entry.ip)
+                if country_code:
+                    known_geoip[entry.ip] = (country_code, country_name)
+
             log_entry = AttackLog(
                 ip=entry.ip,
                 country=country_code,
                 country_name=country_name,
-                jail=sanitize_jail(entry.jail),
+                jail=jail,
                 timestamp=entry.timestamp,
                 action=entry.action,
                 raw_log=entry.raw_log
             )
             session.add(log_entry)
-            
-            # Update stats
+
             if country_code:
                 await update_country_stats(session, country_code, country_name)
-            
+
             await update_jail_stats(session, entry.jail, entry.action)
-            
-            # Update banned IPs
+
             if entry.action == "Ban":
                 await update_banned_ips(
-                    session, entry.ip, entry.jail, entry.timestamp, 
+                    session, entry.ip, entry.jail, entry.timestamp,
                     country_code, country_name
                 )
-        
+
         await session.commit()
 
 
@@ -333,7 +388,7 @@ async def get_stats_overview(
     Returns total bans, today, this week, and top countries.
     """
     async with async_session_maker() as session:
-        now = datetime.utcnow()
+        now = datetime.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         # Use provided days or default to 7
@@ -415,14 +470,14 @@ async def get_stats_overview(
 
 @app.get("/api/stats/attacks-over-time")
 async def get_attacks_over_time(
-    days: int = Query(7, ge=1, le=90),
+    days: int = Query(7, ge=1, le=36500),
     interval: str = Query("hour", pattern="^(hour|day)$")
 ):
     """
     Get time series data for attacks over time.
     """
     async with async_session_maker() as session:
-        start_date = datetime.utcnow() - timedelta(days=days)
+        start_date = datetime.now() - timedelta(days=days)
         
         if interval == "hour":
             # Group by hour
@@ -504,50 +559,34 @@ async def get_top_countries(
     Get country breakdown of attacks.
     """
     async with async_session_maker() as session:
-        start_date = None
+        conditions = [AttackLog.country.isnot(None)]
         if days:
-            start_date = datetime.utcnow() - timedelta(days=days)
-        
-        if start_date:
-            query = select(
-                AttackLog.country,
-                AttackLog.country_name,
-                func.count(AttackLog.id).label("total_attacks"),
-                func.count(func.distinct(AttackLog.ip)).label("unique_ips")
-            ).where(
-                AttackLog.timestamp >= start_date
-            ).group_by(
-                AttackLog.country
-            ).order_by(
-                desc("total_attacks")
-            ).limit(limit)
-        else:
-            query = select(CountryStats).order_by(
-                desc(CountryStats.total_attacks)
-            ).limit(limit)
-        
+            conditions.append(AttackLog.timestamp >= datetime.now() - timedelta(days=days))
+
+        query = select(
+            AttackLog.country,
+            AttackLog.country_name,
+            func.count(AttackLog.id).label("total_attacks"),
+            func.count(func.distinct(AttackLog.ip)).label("unique_ips")
+        ).where(
+            and_(*conditions)
+        ).group_by(
+            AttackLog.country
+        ).order_by(
+            desc("total_attacks")
+        ).limit(limit)
+
         result = await session.execute(query)
-        countries = []
-        
-        try:
-            for row in result:
-                if hasattr(row, 'country'):  # CountryStats object
-                    countries.append({
-                        "country": row.country,
-                        "country_name": row.country_name,
-                        "total_attacks": row.total_attacks,
-                        "unique_ips": row.unique_ips
-                    })
-                else:  # Raw query result
-                    countries.append({
-                        "country": row[0],
-                        "country_name": row[1],
-                        "total_attacks": row[2],
-                        "unique_ips": row[3]
-                    })
-        except Exception:
-            pass
-        
+        countries = [
+            {
+                "country": row.country,
+                "country_name": row.country_name,
+                "total_attacks": row.total_attacks,
+                "unique_ips": row.unique_ips
+            }
+            for row in result
+        ]
+
         return {
             "limit": limit,
             "countries": countries
@@ -562,55 +601,38 @@ async def get_heatmap_data(
     Get attack intensity data by country for map visualization.
     """
     async with async_session_maker() as session:
-        start_date = None
+        conditions = [AttackLog.country.isnot(None)]
         if days:
-            start_date = datetime.utcnow() - timedelta(days=days)
-        
-        if start_date:
-            query = select(
-                AttackLog.country,
-                AttackLog.country_name,
-                func.count(AttackLog.id).label("total_attacks"),
-                func.count(func.distinct(AttackLog.ip)).label("unique_ips")
-            ).where(
-                AttackLog.timestamp >= start_date
-            ).group_by(
-                AttackLog.country
-            ).order_by(
-                desc("total_attacks")
-            )
-        else:
-            query = select(CountryStats).order_by(
-                desc(CountryStats.total_attacks)
-            )
-        
+            conditions.append(AttackLog.timestamp >= datetime.now() - timedelta(days=days))
+
+        query = select(
+            AttackLog.country,
+            AttackLog.country_name,
+            func.count(AttackLog.id).label("total_attacks"),
+            func.count(func.distinct(AttackLog.ip)).label("unique_ips")
+        ).where(
+            and_(*conditions)
+        ).group_by(
+            AttackLog.country
+        ).order_by(
+            desc("total_attacks")
+        )
+
         result = await session.execute(query)
-        heatmap = []
-        
-        # Check if we have CountryStats objects or raw query results
-        try:
-            for row in result:
-                if hasattr(row, 'country'):  # CountryStats object
-                    country_code = row.country
-                    country_name = row.country_name
-                    total = row.total_attacks
-                    unique = row.unique_ips
-                else:  # Raw query result
-                    country_code = row[0]
-                    country_name = row[1]
-                    total = row[2]
-                    unique = row[3]
-                
-                heatmap.append({
-                    "country": country_code,
-                    "country_name": country_name,
-                    "total_attacks": total,
-                    "unique_ips": unique,
-                    "intensity": min(100, total / 10)
-                })
-        except Exception:
-            pass
-        
+        rows = result.all()
+
+        max_attacks = rows[0].total_attacks if rows else 1
+        heatmap = [
+            {
+                "country": row.country,
+                "country_name": row.country_name,
+                "total_attacks": row.total_attacks,
+                "unique_ips": row.unique_ips,
+                "intensity": round((row.total_attacks / max_attacks) * 100, 1)
+            }
+            for row in rows
+        ]
+
         return {
             "heatmap": heatmap
         }
@@ -631,7 +653,7 @@ async def get_banned_ips(
         # Apply time filter
         time_filter = None
         if days:
-            time_filter = datetime.utcnow() - timedelta(days=days)
+            time_filter = datetime.now() - timedelta(days=days)
         
         base_conditions = []
         if jail:
@@ -741,28 +763,14 @@ async def get_logs(
 
 @app.post("/api/refresh")
 async def refresh_data():
-    """
-    Force refresh of data from logs.
-    """
-    log_path = find_log_path()
-    
-    if not log_path:
-        return {"status": "no_log_file", "message": "No Fail2Ban log file found"}
-    
-    entries = await parse_log_file_async(log_path)
-    
+    """Force refresh of data from all logs (including rotated/gzipped)."""
+    entries = await parse_all_logs_async()
+
     if not entries:
-        return {
-            "status": "no_entries", 
-            "message": "No log entries found in file"
-        }
-    
+        return {"status": "no_entries", "message": "No log entries found"}
+
     await process_parsed_entries(entries)
-    
-    return {
-        "status": "success", 
-        "message": f"Processed {len(entries)} log entries"
-    }
+    return {"status": "success", "message": f"Processed {len(entries)} log entries"}
 
 
 @app.get("/api/health")
@@ -770,7 +778,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now().isoformat(),
         "active_websockets": len(websocket_connections)
     }
 
@@ -778,15 +786,28 @@ async def health_check():
 @app.get("/api/stats/system")
 async def get_system_stats():
     """
-    Get system CPU and memory usage.
+    Get system CPU, memory, swap, disk and other important metrics.
     """
     cpu_percent = psutil.cpu_percent(interval=0.1)
     memory = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk = psutil.disk_usage('/')
+    
+    # Uptime in seconds
+    import time as _time
+    uptime_seconds = int(_time.time() - psutil.boot_time())
+    
+    # Load average (Linux only, returns 1, 5, 15 min averages)
+    try:
+        load_avg = psutil.getloadavg()
+    except (AttributeError, OSError):
+        load_avg = (0.0, 0.0, 0.0)
     
     return {
         "cpu": {
             "percent": cpu_percent,
-            "count": psutil.cpu_count()
+            "count": psutil.cpu_count(),
+            "load_avg": load_avg
         },
         "memory": {
             "total": memory.total,
@@ -794,7 +815,20 @@ async def get_system_stats():
             "percent": memory.percent,
             "used": memory.used
         },
-        "timestamp": datetime.utcnow().isoformat()
+        "swap": {
+            "total": swap.total,
+            "free": swap.free,
+            "used": swap.used,
+            "percent": swap.percent
+        },
+        "disk": {
+            "total": disk.total,
+            "free": disk.free,
+            "used": disk.used,
+            "percent": disk.percent
+        },
+        "uptime": uptime_seconds,
+        "timestamp": datetime.now().isoformat()
     }
 
 # Serve the static frontend (index.html from root)

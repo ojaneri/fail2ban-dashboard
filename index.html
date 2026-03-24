@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fail2Ban SOC Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
     
     <!-- TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -201,8 +202,33 @@
             }
         }
         
+        // Helper functions
+        function format_bytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function format_uptime(seconds) {
+            if (!seconds) return '0s';
+            const d = Math.floor(seconds / (3600 * 24));
+            const h = Math.floor((seconds % (3600 * 24)) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            
+            const parts = [];
+            if (d > 0) parts.push(`${d}d`);
+            if (h > 0) parts.push(`${h}h`);
+            if (m > 0) parts.push(`${m}m`);
+            if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+            
+            return parts.join(' ');
+        }
+
         // System Stats Gauge Component
-        function SystemGauge({ title, value, icon, color }) {
+        function SystemGauge({ title, value, icon, color, subtext }) {
             const radius = 40;
             const circumference = 2 * Math.PI * radius;
             const offset = circumference - (value / 100) * circumference;
@@ -230,42 +256,79 @@
                             <span className="text-2xl font-bold text-white">{Math.round(value)}%</span>
                         </div>
                     </div>
+                    {subtext && <p className="text-xs text-gray-500 mt-2">{subtext}</p>}
                     <i className={`${icon} mt-2 text-xl text-gray-400`}></i>
                 </div>
             );
         }
 
-        // WebSocket setup function
-        function setup_websocket(onMessage, onStatusChange) {
+        function SystemInfo({ system }) {
+            if (!system) return null;
+            
+            return (
+                <div className="stat-card rounded-xl p-4 flex flex-col gap-3">
+                    <h3 className="text-gray-400 text-sm font-medium border-b border-soc-border pb-2">System Information</h3>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="flex flex-col">
+                            <span className="text-gray-500 uppercase tracking-wider">Uptime</span>
+                            <span className="text-white font-mono">{format_uptime(system.uptime)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-gray-500 uppercase tracking-wider">Load Avg</span>
+                            <span className="text-white font-mono">{system.cpu?.load_avg?.map(l => l.toFixed(2)).join(', ')}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-gray-500 uppercase tracking-wider">CPU Cores</span>
+                            <span className="text-white font-mono">{system.cpu?.count}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-gray-500 uppercase tracking-wider">Disk Free</span>
+                            <span className="text-white font-mono">{format_bytes(system.disk?.free)} / {format_bytes(system.disk?.total)}</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // WebSocket setup function with exponential backoff
+        function setup_websocket(onMessage, onStatusChange, _attempt = 0) {
+            const MAX_ATTEMPTS = 5;
+            const BASE_DELAY = 5000;
+
+            if (_attempt >= MAX_ATTEMPTS) {
+                // Stop retrying — polling fallback is sufficient
+                return { close: () => {} };
+            }
+
             try {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                // Use /dashboard prefix for WebSocket
                 const ws_url = `${protocol}//${window.location.host}/dashboard/ws`;
-                
                 const socket = new WebSocket(ws_url);
-                
+                let closed = false;
+
                 socket.onopen = () => {
+                    _attempt = 0;
                     onStatusChange('connected');
                 };
-                
+
                 socket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
                         onMessage(data);
                     } catch (e) {}
                 };
-                
+
                 socket.onclose = () => {
-                    onStatusChange('disconnected');
-                    // Retry after 10 seconds
-                    setTimeout(() => setup_websocket(onMessage, onStatusChange), 10000);
+                    if (closed) return;
+                    closed = true;
+                    const delay = BASE_DELAY * Math.pow(2, _attempt);
+                    setTimeout(() => setup_websocket(onMessage, onStatusChange, _attempt + 1), delay);
                 };
-                
-                socket.onerror = (error) => {
-                    // Silent error as we have polling fallback
-                    socket.close();
+
+                socket.onerror = () => {
+                    if (!closed) socket.close();
                 };
-                
+
                 return socket;
             } catch (e) {
                 return { close: () => {} };
@@ -296,11 +359,11 @@
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">Last update: {lastUpdate}</p>
                             </div>
-                            <select 
-                                value={timeRange} 
+                            <select
+                                value={timeRange}
                                 onChange={(e) => {
                                     setTimeRange(e.target.value);
-                                    fetch_all_data(e.target.value);
+                                    onRefresh(e.target.value);
                                 }}
                                 className="bg-soc-card border border-soc-border text-white px-3 py-2 rounded-lg text-sm mr-2"
                             >
@@ -310,8 +373,8 @@
                                 <option value="90">90 Days</option>
                                 <option value="all">All Time</option>
                             </select>
-                            <button 
-                                onClick={() => fetch_all_data(timeRange)}
+                            <button
+                                onClick={() => onRefresh(timeRange)}
                                 className="bg-soc-cyan hover:bg-soc-cyan-dark text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                             >
                                 <i className="fas fa-sync-alt"></i>
@@ -386,7 +449,6 @@
                     const coords = country_coordinates[country.country];
                     if (!coords) return;
                     
-                    const intensity = country.total_attacks / maxAttacks;
                     const intensity = country.total_attacks / maxAttacks;
                     const radius = 8 + (intensity * 25);
                     
@@ -710,8 +772,207 @@
             );
         }
         
+        // IP Detail Modal Component
+        function IPDetailModal({ entry, onClose }) {
+            const mapRef = useRef(null);
+            const mapInstanceRef = useRef(null);
+            const [history, setHistory] = useState([]);
+            const [loadingHistory, setLoadingHistory] = useState(true);
+
+            // Fetch ban history for this IP
+            useEffect(() => {
+                if (!entry) return;
+                fetch_api(`/api/logs?ip=${entry.ip}&action=Ban&limit=10`)
+                    .then(d => { setHistory(d?.logs || []); setLoadingHistory(false); })
+                    .catch(() => setLoadingHistory(false));
+            }, [entry?.ip]);
+
+            // Mini map
+            useEffect(() => {
+                if (!mapRef.current || mapInstanceRef.current) return;
+                const coords = country_coordinates[entry?.country] || [20, 0];
+                const zoom = entry?.country ? 4 : 2;
+
+                mapInstanceRef.current = L.map(mapRef.current, {
+                    center: coords, zoom,
+                    zoomControl: false, attributionControl: false,
+                    dragging: false, scrollWheelZoom: false, doubleClickZoom: false
+                });
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 10 })
+                    .addTo(mapInstanceRef.current);
+                if (entry?.country && country_coordinates[entry.country]) {
+                    L.circleMarker(coords, {
+                        radius: 10, fillColor: '#ef4444', color: '#fff', weight: 2,
+                        opacity: 1, fillOpacity: 0.9
+                    }).addTo(mapInstanceRef.current);
+                }
+                return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
+            }, []);
+
+            // Close on Escape key
+            useEffect(() => {
+                const handler = (e) => { if (e.key === 'Escape') onClose(); };
+                window.addEventListener('keydown', handler);
+                return () => window.removeEventListener('keydown', handler);
+            }, []);
+
+            if (!entry) return null;
+
+            const exact_time = entry.ban_timestamp
+                ? new Date(entry.ban_timestamp).toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                  })
+                : '-';
+
+            const jail_colors = {
+                sshd: 'bg-red-900/40 text-red-400 border-red-700',
+                'ssh-jail': 'bg-red-900/40 text-red-400 border-red-700',
+                recidive: 'bg-purple-900/40 text-purple-400 border-purple-700',
+                'apache-noscript': 'bg-orange-900/40 text-orange-400 border-orange-700',
+                'nginx-http-auth': 'bg-yellow-900/40 text-yellow-400 border-yellow-700',
+            };
+            const jail_class = jail_colors[entry.jail] || 'bg-gray-800/40 text-gray-400 border-gray-600';
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+                    {/* Backdrop */}
+                    <div className="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+
+                    {/* Modal */}
+                    <div className="relative w-full max-w-2xl panel rounded-2xl border border-soc-border shadow-2xl overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-soc-border bg-soc-card">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-red-600/20 flex items-center justify-center border border-red-600/40">
+                                    <i className="fas fa-shield-virus text-red-400"></i>
+                                </div>
+                                <div>
+                                    <h2 className="text-white font-bold text-lg font-mono">{entry.ip}</h2>
+                                    <p className="text-gray-500 text-xs">IP Banido</p>
+                                </div>
+                            </div>
+                            <button onClick={onClose}
+                                className="w-8 h-8 rounded-lg bg-soc-dark flex items-center justify-center text-gray-400 hover:text-white hover:bg-soc-border transition-colors">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+                            {/* Left column */}
+                            <div className="flex flex-col gap-4">
+                                {/* Info cards */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                        <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">País</p>
+                                        <p className="text-white text-sm font-medium flex items-center gap-2">
+                                            <span className="text-xl">{get_country_flag(entry.country)}</span>
+                                            {entry.country_name || 'Desconhecido'}
+                                        </p>
+                                    </div>
+                                    <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                        <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Jail</p>
+                                        <span className={`px-2 py-1 rounded text-xs font-mono border ${jail_class}`}>
+                                            {entry.jail}
+                                        </span>
+                                    </div>
+                                    <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                        <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Bans Totais</p>
+                                        <p className="text-white text-lg font-bold">{entry.ban_count || 1}
+                                            <span className="text-gray-500 text-xs ml-1">vez{(entry.ban_count || 1) > 1 ? 'es' : ''}</span>
+                                        </p>
+                                    </div>
+                                    <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                        <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Código</p>
+                                        <p className="text-soc-cyan font-mono text-sm">{entry.country || 'N/A'}</p>
+                                    </div>
+                                </div>
+
+                                {/* Exact time */}
+                                <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                    <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">
+                                        <i className="fas fa-clock mr-1"></i>Hora Exata do Ban
+                                    </p>
+                                    <p className="text-white font-mono text-sm">{exact_time}</p>
+                                    <p className="text-gray-500 text-xs mt-1">{format_time(entry.ban_timestamp)}</p>
+                                </div>
+
+                                {/* Ban history */}
+                                <div className="bg-soc-dark rounded-xl p-3 border border-soc-border flex-1">
+                                    <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
+                                        <i className="fas fa-history mr-1"></i>Histórico de Bans
+                                    </p>
+                                    {loadingHistory ? (
+                                        <p className="text-gray-600 text-xs">Carregando...</p>
+                                    ) : history.length === 0 ? (
+                                        <p className="text-gray-600 text-xs">Sem histórico encontrado</p>
+                                    ) : (
+                                        <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                                            {history.map((log, i) => (
+                                                <div key={i} className="flex items-center justify-between text-xs">
+                                                    <span className="text-gray-400 font-mono">
+                                                        {new Date(log.timestamp).toLocaleString('pt-BR', {
+                                                            day:'2-digit', month:'2-digit',
+                                                            hour:'2-digit', minute:'2-digit'
+                                                        })}
+                                                    </span>
+                                                    <span className="px-1.5 py-0.5 bg-red-900/30 text-red-400 rounded text-xs">{log.jail}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Right column — mini map */}
+                            <div className="flex flex-col gap-4">
+                                <div>
+                                    <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
+                                        <i className="fas fa-map-marker-alt mr-1"></i>Localização
+                                    </p>
+                                    <div ref={mapRef} className="w-full h-[220px] rounded-xl overflow-hidden border border-soc-border"></div>
+                                    {!country_coordinates[entry.country] && (
+                                        <p className="text-gray-600 text-xs mt-1 text-center">Coordenadas não disponíveis para este país</p>
+                                    )}
+                                </div>
+
+                                {/* Threat assessment */}
+                                <div className="bg-soc-dark rounded-xl p-3 border border-soc-border">
+                                    <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
+                                        <i className="fas fa-exclamation-triangle mr-1"></i>Nível de Ameaça
+                                    </p>
+                                    {(() => {
+                                        const count = entry.ban_count || 1;
+                                        const level = count >= 10 ? ['CRÍTICO', 'text-red-400', 100]
+                                                    : count >= 5  ? ['ALTO',    'text-orange-400', 66]
+                                                    : count >= 2  ? ['MÉDIO',   'text-yellow-400', 33]
+                                                    :               ['BAIXO',   'text-green-400',  10];
+                                        return (
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className={`text-sm font-bold ${level[1]}`}>{level[0]}</span>
+                                                    <span className="text-gray-500 text-xs">{count} ban{count > 1 ? 's' : ''}</span>
+                                                </div>
+                                                <div className="w-full h-2 bg-soc-border rounded-full overflow-hidden">
+                                                    <div className="h-full rounded-full transition-all duration-500"
+                                                         style={{ width: `${Math.min(level[2], 100)}%`,
+                                                                  background: count >= 10 ? '#ef4444' : count >= 5 ? '#f97316' : count >= 2 ? '#eab308' : '#22c55e' }}>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         // Recent Bans Table Component
-        function RecentBansTable({ data, loading }) {
+        function RecentBansTable({ data, loading, onViewDetails }) {
             if (loading) {
                 return (
                     <div className="panel rounded-xl p-4">
@@ -768,11 +1029,8 @@
                                             {format_time(entry.ban_timestamp)}
                                         </td>
                                         <td className="py-3 text-right">
-                                            <button className="text-soc-cyan hover:text-white transition-colors p-1" title="View Details">
+                                            <button onClick={() => onViewDetails(entry)} className="text-soc-cyan hover:text-white transition-colors p-1" title="Ver Detalhes">
                                                 <i className="fas fa-eye"></i>
-                                            </button>
-                                            <button className="text-soc-red hover:text-white transition-colors p-1 ml-2" title="Unban">
-                                                <i className="fas fa-ban"></i>
                                             </button>
                                         </td>
                                     </tr>
@@ -822,6 +1080,7 @@
             const [error, setError] = useState(null);
             const [lastUpdate, setLastUpdate] = useState(format_current_time());
             const [status, setStatus] = useState('loading');
+            const [selectedIP, setSelectedIP] = useState(null);
             const [data, setData] = useState({
                 overview: null,
                 attacks_over_time: null,
@@ -856,9 +1115,10 @@
                 }
             };
             
-            const fetch_attacks_over_time = async () => {
+            const fetch_attacks_over_time = async (days = timeRange) => {
                 try {
-                    const attacksOverTime = await fetch_api('/api/stats/attacks-over-time?days=7&interval=day');
+                    const daysParam = days === 'all' ? '36500' : days;
+                    const attacksOverTime = await fetch_api(`/api/stats/attacks-over-time?days=${daysParam}&interval=day`);
                     if (attacksOverTime) {
                         setData(prev => ({ ...prev, attacks_over_time: attacksOverTime }));
                         setStatus('connected');
@@ -867,10 +1127,11 @@
                     console.error('Error fetching attacks over time:', err);
                 }
             };
-            
-            const fetch_top_countries = async () => {
+
+            const fetch_top_countries = async (days = timeRange) => {
                 try {
-                    const topCountries = await fetch_api('/api/stats/top-countries?limit=10');
+                    const daysParam = days === 'all' ? '36500' : days;
+                    const topCountries = await fetch_api(`/api/stats/top-countries?limit=10&days=${daysParam}`);
                     if (topCountries) {
                         setData(prev => ({ ...prev, top_countries: topCountries }));
                         setStatus('connected');
@@ -879,10 +1140,11 @@
                     console.error('Error fetching top countries:', err);
                 }
             };
-            
-            const fetch_heatmap_data = async () => {
+
+            const fetch_heatmap_data = async (days = timeRange) => {
                 try {
-                    const heatmapData = await fetch_api('/api/stats/heatmap-data');
+                    const daysParam = days === 'all' ? '36500' : days;
+                    const heatmapData = await fetch_api(`/api/stats/heatmap-data?days=${daysParam}`);
                     if (heatmapData) {
                         setData(prev => ({ ...prev, heatmap_data: heatmapData }));
                         setStatus('connected');
@@ -918,9 +1180,6 @@
                         fetch_api(`/api/stats/heatmap-data?days=${daysParam}`),
                         fetch_api(`/api/banned-ips?limit=20&days=${daysParam}`)
                     ]);
-                    
-                    console.log('API Response - overview:', overview);
-                    console.log('API Response - bannedIps:', bannedIps);
                     
                     // Only update data if we got valid responses
                     if (overview && overview.total_bans > 0) {
@@ -1010,23 +1269,40 @@
             
             return (
                 <div className="min-h-screen">
-                    <Header lastUpdate={lastUpdate} status={status} timeRange={timeRange} setTimeRange={setTimeRange} onRefresh={() => fetch_all_data()} />
+                    <Header lastUpdate={lastUpdate} status={status} timeRange={timeRange} setTimeRange={setTimeRange} onRefresh={fetch_all_data} />
                     
                     <main className="p-6">
                         {/* System Stats Row */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                             <SystemGauge 
                                 title="CPU Usage" 
                                 value={data.system?.cpu?.percent || 0} 
                                 icon="fas fa-microchip" 
                                 color="text-soc-cyan"
+                                subtext={`${data.system?.cpu?.count || 0} Cores`}
                             />
                             <SystemGauge 
                                 title="Memory Usage" 
                                 value={data.system?.memory?.percent || 0} 
                                 icon="fas fa-memory" 
                                 color="text-soc-cyan"
+                                subtext={`${format_bytes(data.system?.memory?.used)} / ${format_bytes(data.system?.memory?.total)}`}
                             />
+                            <SystemGauge 
+                                title="Swap Usage" 
+                                value={data.system?.swap?.percent || 0} 
+                                icon="fas fa-exchange-alt" 
+                                color="text-soc-cyan"
+                                subtext={`${format_bytes(data.system?.swap?.used)} / ${format_bytes(data.system?.swap?.total)}`}
+                            />
+                            <SystemGauge 
+                                title="Disk Usage" 
+                                value={data.system?.disk?.percent || 0} 
+                                icon="fas fa-hdd" 
+                                color="text-soc-cyan"
+                                subtext={`${format_bytes(data.system?.disk?.used)} / ${format_bytes(data.system?.disk?.total)}`}
+                            />
+                            <SystemInfo system={data.system} />
                         </div>
                         
                         {/* Stats Cards Row */}
@@ -1075,7 +1351,14 @@
                         </div>
                         
                         {/* Recent Bans Table */}
-                        <RecentBansTable data={data.banned_ips?.ips ? { ips: data.banned_ips.ips } : data.banned_ips} loading={loading} />
+                        <RecentBansTable
+                            data={data.banned_ips?.ips ? { ips: data.banned_ips.ips } : data.banned_ips}
+                            loading={loading}
+                            onViewDetails={(entry) => setSelectedIP(entry)}
+                        />
+
+                        {/* IP Detail Modal */}
+                        {selectedIP && <IPDetailModal entry={selectedIP} onClose={() => setSelectedIP(null)} />}
                         
                         {/* Footer */}
                         <footer className="mt-6 text-center text-gray-500 text-sm">

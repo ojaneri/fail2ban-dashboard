@@ -6,7 +6,10 @@ Require valid-user
 # Enable Rewrite Engine
 RewriteEngine On
 
-# Forward everything to the backend on port 8000
-# The backend now handles both the API and serving index.html
+# Forward WebSocket connections (must come before the general rule)
+RewriteCond %{HTTP:Upgrade} =WebSocket [NC]
+RewriteRule ^(.*)$ ws://localhost:8000/$1 [P,L]
+
+# Forward everything else to the backend on port 8000
 RewriteRule ^$ http://localhost:8000/ [P,L]
 RewriteRule ^(.*)$ http://localhost:8000/$1 [P,L]

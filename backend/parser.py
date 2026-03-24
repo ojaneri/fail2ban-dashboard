@@ -2,6 +2,7 @@
 Fail2Ban log parser module for SOC Dashboard.
 Parses various Fail2Ban log formats and extracts relevant information.
 """
+import gzip
 import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -184,64 +185,90 @@ def parse_line(line: str) -> Optional[ParseResult]:
 
 
 def parse_log_file(log_path: str) -> List[ParseResult]:
-    """
-    Parse a Fail2Ban log file.
-    
-    Args:
-        log_path: Path to the log file
-        
-    Returns:
-        List of ParseResult objects
-    """
+    """Parse a Fail2Ban log file (plain text or .gz)."""
     results = []
-    
     try:
         path = Path(log_path)
         if not path.exists():
             return results
-        
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+
+        opener = gzip.open if path.suffix == ".gz" else open
+        with opener(path, "rt", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 result = parse_line(line)
                 if result:
                     results.append(result)
-    except (PermissionError, IOError):
+    except (PermissionError, IOError, OSError):
         pass
-    
     return results
 
 
 async def parse_log_file_async(log_path: str) -> List[ParseResult]:
-    """
-    Async version of parse_log_file.
-    
-    Args:
-        log_path: Path to the log file
-        
-    Returns:
-        List of ParseResult objects
-    """
+    """Async version of parse_log_file."""
     return await asyncio.to_thread(parse_log_file, log_path)
 
 
 def find_log_path() -> Optional[str]:
-    """
-    Find an available Fail2Ban log file.
-    
-    Returns:
-        Path to log file or None if not found
-    """
+    """Find the current (active) Fail2Ban log file."""
     for path_str in DEFAULT_LOG_PATHS:
         path = Path(path_str)
         if path.exists() and path.is_file():
             try:
-                # Check if readable
                 with open(path, "r") as f:
                     f.read(1)
                 return path_str
             except (PermissionError, IOError):
                 continue
     return None
+
+
+def find_all_log_paths() -> List[str]:
+    """
+    Find all Fail2Ban log files including rotated/gzipped ones,
+    ordered from oldest to newest so entries are processed chronologically.
+    """
+    base_dirs = ["/var/log", "/var/log/fail2ban"]
+    found = []
+
+    for base in base_dirs:
+        base_path = Path(base)
+        if not base_path.exists():
+            continue
+        for p in sorted(base_path.glob("fail2ban.log*"), reverse=True):
+            if p.is_file():
+                try:
+                    opener = gzip.open if p.suffix == ".gz" else open
+                    with opener(str(p), "rt", errors="ignore") as f:
+                        f.read(1)
+                    if str(p) not in found:
+                        found.append(str(p))
+                except (PermissionError, IOError, OSError):
+                    continue
+
+    # Sort: rotated files first (oldest → newest), active log last
+    def sort_key(p):
+        name = Path(p).name
+        if name == "fail2ban.log":
+            return 0
+        # extract numeric suffix: .1 → 1, .2.gz → 2
+        import re as _re
+        m = _re.search(r"\.(\d+)", name)
+        return -(int(m.group(1))) if m else -99
+
+    found.sort(key=sort_key)
+    return found
+
+
+async def parse_all_logs_async() -> List[ParseResult]:
+    """Parse all available Fail2Ban log files (including rotated/gzipped)."""
+    paths = find_all_log_paths()
+    all_results: List[ParseResult] = []
+    for path in paths:
+        entries = await parse_log_file_async(path)
+        all_results.extend(entries)
+    # Sort all entries chronologically
+    all_results.sort(key=lambda e: e.timestamp)
+    return all_results
 
 
 def generate_demo_data() -> List[ParseResult]:
